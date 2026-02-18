@@ -310,17 +310,25 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     async def _async_set_charge_power(self, value: float, reason: str = "") -> None:
         """Set the max AC charging power (snapped to step).
 
-        When value is 0, the charge switch is automatically turned off.
+        When value is <= 0, the charge switch is turned off and the number
+        entity is left unchanged (EcoFlow does not accept 0).
         When value is > 0, the value is clamped between min and max charge power.
         """
-        max_power = self._get_option(OPT_MAX_CHARGE_POWER, DEFAULT_MAX_CHARGE_POWER)
         if value <= 0:
-            snapped = 0
-            # Charge power 0 means charge switch must be off
+            # Just turn off the charge switch; don't send 0 to the number entity
+            # because EcoFlow has a minimum value and rejects 0.
             await self._async_set_charge_switch(False)
-        else:
-            min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
-            snapped = self._snap_to_step(max(min(value, max_power), min_power))
+            if self._last_charge_power != 0:
+                old_power = self._last_charge_power
+                self._last_charge_power = 0
+                self._current_charge_power = 0
+                log_reason = reason or f"Charge power {old_power}W → 0W (switch off)"
+                self._log_decision(LOG_POWER_ADJUST, log_reason)
+            return
+
+        max_power = self._get_option(OPT_MAX_CHARGE_POWER, DEFAULT_MAX_CHARGE_POWER)
+        min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
+        snapped = self._snap_to_step(max(min(value, max_power), min_power))
         if self._last_charge_power == snapped:
             return
         old_power = self._last_charge_power
@@ -339,9 +347,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     async def _async_set_feed_in_power(self, value: float, reason: str = "") -> None:
         """Set the custom load (feed-in) power.
 
-        When value is > 0, the discharge switch is turned on and PowerStream
-        is set to 'Prioritize power supply' to enable feed-in.
-        When value is 0, the discharge switch is turned off.
+        When value is > 0, the discharge switch is turned on, PowerStream
+        is set to 'Prioritize power supply', and the power value is sent.
+        When value is <= 0, the discharge switch is turned off and the number
+        entity is left unchanged (EcoFlow may not accept 0).
         """
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
@@ -353,12 +362,21 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             value, snapped, self._last_feed_in_power, max_feed_in,
         )
 
-        # Control discharge switch and PowerStream mode based on feed-in power
-        if snapped > 0:
-            await self._async_set_discharge_switch(True)
-            await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
-        else:
+        if snapped <= 0:
+            # Just turn off the discharge switch; don't send 0 to the number
+            # entity because EcoFlow may reject it.
             await self._async_set_discharge_switch(False)
+            if self._last_feed_in_power != 0:
+                old_power = self._last_feed_in_power
+                self._last_feed_in_power = 0
+                self._current_feed_in_power = 0
+                log_reason = reason or f"Feed-in power {old_power}W → 0W (switch off)"
+                self._log_decision(LOG_POWER_ADJUST, log_reason)
+            return
+
+        # Feed-in > 0: activate discharge switch and PS mode first
+        await self._async_set_discharge_switch(True)
+        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
 
         if self._last_feed_in_power == snapped:
             _LOGGER.debug(
