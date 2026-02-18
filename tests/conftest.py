@@ -35,6 +35,7 @@ from custom_components.ha_energy_manager.const import (
 )
 
 
+
 MOCK_ENTITY_IDS = {
     CONF_GRID_POWER_SENSOR: "sensor.grid_power",
     CONF_SOLAR_POWER_SENSOR: "sensor.solar_power",
@@ -108,9 +109,20 @@ def coordinator(mock_hass, mock_config_entry):
         EnergyManagerCoordinator,
     )
 
-    coord = EnergyManagerCoordinator(
-        mock_hass, mock_config_entry, entity_ids=dict(MOCK_ENTITY_IDS)
-    )
+    # Patch DataUpdateCoordinator.__init__ to avoid HA event loop requirements
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        lambda self, *args, **kwargs: None,
+    ):
+        coord = EnergyManagerCoordinator(
+            mock_hass, mock_config_entry, entity_ids=dict(MOCK_ENTITY_IDS)
+        )
+    # Set attributes that DataUpdateCoordinator.__init__ would normally set
+    coord.hass = mock_hass
+    coord.logger = MagicMock()
+    coord.name = DOMAIN
+    coord.update_interval = None
+
     # Bypass dwell time for tests by default
     coord._fsm_state_entered_at = time.monotonic() - 120
     return coord

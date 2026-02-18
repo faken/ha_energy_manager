@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
     DEFAULT_FEED_IN_MODE,
+    DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
     DEFAULT_LOG_BUFFER_SIZE,
     DEFAULT_MAX_CHARGE_POWER,
@@ -546,11 +547,16 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             OPT_GRID_POWER_TOLERANCE_DISCHARGE, DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE
         )
 
-        # Solar surplus means we are exporting to grid (grid_power < 0)
-        # OR solar covers household AND has enough left to charge at min_power
-        # Simple check: if grid_power is negative we definitely have surplus,
-        # or if solar is high enough that charging wouldn't increase grid import
-        has_solar_surplus = grid_power < 0 or (solar_power > min_power and grid_power < deadband)
+        # Solar surplus detection: check if there's genuine solar surplus
+        # independent of our own feed-in effect on the grid reading.
+        # Correct the grid reading by removing our feed-in effect:
+        # grid_without_feedin = grid_power + current_feed_in
+        # This gives us what the grid would read if we weren't feeding in.
+        grid_without_feedin = grid_power + self._current_feed_in_power
+        has_solar_surplus = (
+            grid_without_feedin < 0
+            or (solar_power > min_power and grid_without_feedin < deadband)
+        )
         dwell_ok = self._dwell_time_exceeded()
 
         if self._fsm_state == STATE_CHARGE:
@@ -710,30 +716,51 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: DISCHARGE state."""
-        _LOGGER.debug(
-            "auto_discharge: grid=%.0f, soc=%.0f, mode=%s, tolerance=%.0f, max_feed_in=%.0f",
-            grid_power, battery_soc, feed_in_mode, grid_tolerance, max_feed_in,
-        )
-        # Calculate feed-in power
-        if feed_in_mode == FEED_IN_DYNAMIC:
-            # The grid_power reading already includes our current feed-in effect.
-            # To find the actual household consumption, add back our current feed-in:
-            # consumption = grid_power + current_feed_in
-            # Then the new target = consumption - grid_tolerance
-            consumption = grid_power + self._current_feed_in_power
-            target = consumption - grid_tolerance
-            feed_in = max(min(target, max_feed_in), 0)
-            reason = (
-                f"Dynamic feed-in: consumption {consumption:.0f}W "
-                f"(grid {grid_power:.0f}W + feed-in {self._current_feed_in_power:.0f}W) "
-                f"- tolerance {grid_tolerance:.0f}W = target {target:.0f}W, "
-                f"clamped to {feed_in:.0f}W"
-            )
-        else:
-            feed_in = min(feed_in_static, max_feed_in)
-            reason = f"Static feed-in: {feed_in:.0f}W"
+        feed_in_step = DEFAULT_FEED_IN_POWER_STEP
+        current_feed_in = self._current_feed_in_power
 
-        await self._async_set_feed_in_power(feed_in, reason=reason)
+        _LOGGER.debug(
+            "auto_discharge: grid=%.0f, soc=%.0f, mode=%s, tolerance=%.0f, "
+            "max_feed_in=%.0f, current_feed_in=%.0f",
+            grid_power, battery_soc, feed_in_mode, grid_tolerance,
+            max_feed_in, current_feed_in,
+        )
+
+        # Calculate feed-in power with GRADUAL adjustment (one step per cycle)
+        # This prevents oscillation caused by the grid sensor reporting delayed values.
+        if feed_in_mode == FEED_IN_DYNAMIC:
+            # Use grid_power directly to decide direction.
+            # If grid_power > tolerance: household is importing → increase feed-in
+            # If grid_power < 0: we're exporting → decrease feed-in
+            # If 0 <= grid_power <= tolerance: close enough → hold steady
+            if grid_power > grid_tolerance:
+                # Grid import too high → ramp up feed-in by one step
+                new_feed_in = min(current_feed_in + feed_in_step, max_feed_in)
+                reason = (
+                    f"Dynamic feed-in: grid import {grid_power:.0f}W > tolerance "
+                    f"{grid_tolerance:.0f}W, increasing {current_feed_in:.0f}W "
+                    f"→ {new_feed_in:.0f}W"
+                )
+            elif grid_power < -grid_tolerance:
+                # Grid export → we're feeding in too much → ramp down
+                new_feed_in = max(current_feed_in - feed_in_step, 0)
+                reason = (
+                    f"Dynamic feed-in: grid export {abs(grid_power):.0f}W > tolerance "
+                    f"{grid_tolerance:.0f}W, decreasing {current_feed_in:.0f}W "
+                    f"→ {new_feed_in:.0f}W"
+                )
+            else:
+                # Within tolerance band → hold current value
+                new_feed_in = current_feed_in
+                reason = (
+                    f"Dynamic feed-in: grid {grid_power:.0f}W within tolerance "
+                    f"±{grid_tolerance:.0f}W, holding at {current_feed_in:.0f}W"
+                )
+        else:
+            new_feed_in = min(feed_in_static, max_feed_in)
+            reason = f"Static feed-in: {new_feed_in:.0f}W"
+
+        await self._async_set_feed_in_power(new_feed_in, reason=reason)
 
         # No charging during discharge — power 0 also turns off charge switch
         await self._async_set_charge_power(0)
