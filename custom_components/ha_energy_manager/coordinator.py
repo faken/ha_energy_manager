@@ -335,11 +335,24 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._log_decision(LOG_POWER_ADJUST, log_reason)
 
     async def _async_set_feed_in_power(self, value: float, reason: str = "") -> None:
-        """Set the custom load (feed-in) power."""
+        """Set the custom load (feed-in) power.
+
+        When value is > 0, the discharge switch is turned on and PowerStream
+        is set to 'Prioritize power supply' to enable feed-in.
+        When value is 0, the discharge switch is turned off.
+        """
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
         )
         snapped = self._snap_to_step(max(min(value, max_feed_in), 0), step=50)
+
+        # Control discharge switch and PowerStream mode based on feed-in power
+        if snapped > 0:
+            await self._async_set_discharge_switch(True)
+            await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        else:
+            await self._async_set_discharge_switch(False)
+
         if self._last_feed_in_power == snapped:
             return
         old_power = self._last_feed_in_power
@@ -403,10 +416,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         """Execute forced charge mode logic."""
         max_power = self._get_option(OPT_MAX_CHARGE_POWER, DEFAULT_MAX_CHARGE_POWER)
 
-        await self._async_set_charge_switch(True)
-        await self._async_set_discharge_switch(False)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
+        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
+        await self._async_set_charge_switch(True)
         await self._async_set_charge_power(
             max_power,
             reason=f"Forced charge at max {max_power}W",
@@ -415,13 +427,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
     async def _run_hold(self) -> None:
         """Execute hold mode logic."""
-        await self._async_set_discharge_switch(False)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        await self._async_set_feed_in_power(0)
         await self._async_set_charge_power(
             0,
             reason="Hold mode, charge power 0W, switch off",
         )
-        await self._async_set_feed_in_power(0)
         self._fsm_state = STATE_HOLD
 
     async def _run_solar(self, grid_power: float, solar_power: float) -> None:
@@ -440,9 +450,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             await self._run_hold()
             return
 
-        await self._async_set_discharge_switch(False)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
+        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
 
         # Gradual adjustment: one step per cycle
         current = self._current_charge_power or min_power
@@ -540,9 +549,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: CHARGE state."""
-        await self._async_set_discharge_switch(False)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
+        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
 
         # Gradual charge power adjustment
         current = self._current_charge_power or min_power
@@ -608,10 +616,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
         )
 
-        await self._async_set_discharge_switch(False)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
-        await self._async_set_charge_power(0)
         await self._async_set_feed_in_power(0)
+        await self._async_set_charge_power(0)
 
         # State transitions
         if dwell_ok:
@@ -643,9 +649,6 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: DISCHARGE state."""
-        await self._async_set_discharge_switch(True)
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
-
         # Calculate feed-in power
         if feed_in_mode == FEED_IN_DYNAMIC:
             target = grid_power - grid_tolerance
