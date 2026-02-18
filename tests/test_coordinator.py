@@ -13,6 +13,7 @@ from custom_components.ha_energy_manager.const import (
     CONF_DISCHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
+    DEFAULT_LOG_BUFFER_SIZE,
     MODE_AUTOMATIC,
     MODE_FORCED_CHARGE,
     MODE_HOLD,
@@ -54,11 +55,8 @@ class TestSetChargePower:
 
     @pytest.mark.asyncio
     async def test_set_charge_power_positive(self, coordinator, mock_hass):
-        """Setting positive charge power sends service call."""
+        """Setting positive charge power sends number.set_value service call."""
         await coordinator._async_set_charge_power(400, reason="test")
-        mock_hass.services.async_call.assert_any_call(
-            "switch", "turn_on", {"entity_id": "switch.charge"}
-        )
         mock_hass.services.async_call.assert_any_call(
             "number", "set_value", {"entity_id": "number.charge_power", "value": 400}
         )
@@ -69,8 +67,13 @@ class TestSetChargePower:
     async def test_set_charge_power_zero_turns_off_switch(self, coordinator, mock_hass):
         """Setting charge power to 0 turns off switch, does NOT send number.set_value(0)."""
         await coordinator._async_set_charge_power(0, reason="test")
-        mock_hass.services.async_call.assert_called_once_with(
+        mock_hass.services.async_call.assert_any_call(
             "switch", "turn_off", {"entity_id": "switch.charge"}
+        )
+        # Verify no number.set_value call was made
+        assert not any(
+            call[0] == ("number", "set_value")
+            for call in mock_hass.services.async_call.call_args_list
         )
         assert coordinator._last_charge_power == 0
         assert coordinator._current_charge_power == 0
@@ -79,7 +82,7 @@ class TestSetChargePower:
     async def test_set_charge_power_negative_turns_off_switch(self, coordinator, mock_hass):
         """Negative value also turns off switch."""
         await coordinator._async_set_charge_power(-100, reason="test")
-        mock_hass.services.async_call.assert_called_once_with(
+        mock_hass.services.async_call.assert_any_call(
             "switch", "turn_off", {"entity_id": "switch.charge"}
         )
 
@@ -156,8 +159,13 @@ class TestSetFeedInPower:
         mock_hass.services.async_call.reset_mock()
 
         await coordinator._async_set_feed_in_power(0, reason="stop")
-        mock_hass.services.async_call.assert_called_once_with(
+        mock_hass.services.async_call.assert_any_call(
             "switch", "turn_off", {"entity_id": "switch.discharge"}
+        )
+        # Verify no number.set_value(0) call was made
+        assert not any(
+            call[0] == ("number", "set_value") and call[1].get("value") == 0
+            for call in mock_hass.services.async_call.call_args_list
         )
         assert coordinator._last_feed_in_power == 0
 
@@ -330,28 +338,42 @@ class TestAutomaticMode:
 
     @pytest.mark.asyncio
     async def test_hold_stays_hold_low_consumption(self, coordinator, mock_hass):
-        """HOLD stays HOLD when no surplus and low consumption."""
+        """HOLD stays HOLD when no surplus and grid within tolerance (dynamic mode)."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_HOLD
         coordinator._fsm_state_entered_at = time.monotonic() - 120
 
+        # grid=30 is within tolerance (50), so no discharge trigger
         await coordinator._run_automatic(
-            grid_power=200, solar_power=0, battery_soc=50
+            grid_power=30, solar_power=0, battery_soc=50
         )
         assert coordinator._fsm_state == STATE_HOLD
 
     @pytest.mark.asyncio
-    async def test_charge_to_hold_no_surplus(self, coordinator, mock_hass):
-        """CHARGE → HOLD when no solar surplus."""
+    async def test_charge_to_hold_no_surplus_low_soc(self, coordinator, mock_hass):
+        """CHARGE → HOLD when no solar surplus and SOC <= min (can't discharge)."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_CHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
 
-        # High grid import, no solar = no surplus
+        # High grid import, no solar, low SOC → can't discharge → HOLD
+        await coordinator._run_automatic(
+            grid_power=500, solar_power=0, battery_soc=10
+        )
+        assert coordinator._fsm_state == STATE_HOLD
+
+    @pytest.mark.asyncio
+    async def test_charge_to_discharge_dynamic_mode(self, coordinator, mock_hass):
+        """CHARGE → DISCHARGE in dynamic mode when grid > tolerance and SOC > min."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_CHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+
+        # High grid import, no solar, sufficient SOC → DISCHARGE (dynamic mode)
         await coordinator._run_automatic(
             grid_power=500, solar_power=0, battery_soc=50
         )
-        assert coordinator._fsm_state == STATE_HOLD
+        assert coordinator._fsm_state == STATE_DISCHARGE
 
     @pytest.mark.asyncio
     async def test_charge_to_discharge_high_consumption(self, coordinator, mock_hass):
@@ -384,6 +406,8 @@ class TestAutomaticMode:
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
+        # Set current solar power (normally set by _async_update_data)
+        coordinator._current_solar_power = 1000
 
         await coordinator._run_automatic(
             grid_power=-200, solar_power=1000, battery_soc=50
@@ -409,47 +433,115 @@ class TestAutomaticMode:
 
 
 class TestDynamicFeedIn:
-    """Test dynamic feed-in power calculation in discharge state."""
+    """Test dynamic feed-in power calculation in discharge state.
+
+    Dynamic feed-in uses GRADUAL adjustment (one 50W step per cycle)
+    to prevent oscillation from delayed grid sensor readings.
+    """
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_calculation(self, coordinator, mock_hass):
-        """Dynamic feed-in = grid_power - tolerance, clamped to max."""
+    async def test_dynamic_feed_in_ramps_up_one_step(self, coordinator, mock_hass):
+        """Dynamic feed-in increases by one step when grid import > tolerance."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 0  # starting from 0
 
-        # grid=500, tolerance=50 → target=450, snapped to 450 (nearest 50)
+        # grid=500, tolerance=50 → grid > tolerance → ramp up by 50W
         await coordinator._run_automatic(
             grid_power=500, solar_power=0, battery_soc=50
         )
-        # 500 - 50 = 450, snapped to 450
-        assert coordinator._current_feed_in_power == 450
+        assert coordinator._current_feed_in_power == 50  # 0 + 50
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_clamped_to_max(self, coordinator, mock_hass):
-        """Dynamic feed-in is clamped to max_grid_feed_in_power."""
+    async def test_dynamic_feed_in_ramps_up_from_existing(self, coordinator, mock_hass):
+        """Dynamic feed-in increases from current value by one step."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 300
+        coordinator._last_feed_in_power = 300
 
-        # grid=2000, tolerance=50 → target=1950, clamped to max 800
+        # grid=500, tolerance=50 → ramp up 300 → 350
+        await coordinator._run_automatic(
+            grid_power=500, solar_power=0, battery_soc=50
+        )
+        assert coordinator._current_feed_in_power == 350  # 300 + 50
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_clamped_to_max(self, coordinator, mock_hass):
+        """Dynamic feed-in ramp-up is clamped to max_grid_feed_in_power."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 800  # already at max
+        coordinator._last_feed_in_power = 800
+
+        # grid=2000, tolerance=50 → wants to ramp up but already at max 800
         await coordinator._run_automatic(
             grid_power=2000, solar_power=0, battery_soc=50
         )
         assert coordinator._current_feed_in_power == 800
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_zero_when_low_grid(self, coordinator, mock_hass):
-        """Dynamic feed-in is 0 when grid power < tolerance."""
+    async def test_dynamic_feed_in_ramps_down_on_export(self, coordinator, mock_hass):
+        """Dynamic feed-in decreases by one step when grid export > tolerance."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 400
+        coordinator._last_feed_in_power = 400
 
-        # grid=30, tolerance=50 → target=-20, clamped to 0
+        # grid=-100 (exporting), tolerance=50 → ramp down 400 → 350
+        await coordinator._run_automatic(
+            grid_power=-100, solar_power=0, battery_soc=50
+        )
+        assert coordinator._current_feed_in_power == 350  # 400 - 50
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_holds_within_tolerance(self, coordinator, mock_hass):
+        """Dynamic feed-in holds steady when grid within tolerance band."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 300
+        coordinator._last_feed_in_power = 300
+
+        # grid=30, tolerance=50 → within band → hold at 300
+        await coordinator._run_automatic(
+            grid_power=30, solar_power=0, battery_soc=50
+        )
+        assert coordinator._current_feed_in_power == 300
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_zero_when_already_zero_and_low_grid(self, coordinator, mock_hass):
+        """Dynamic feed-in stays 0 when grid within tolerance and starting at 0."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 0
+
+        # grid=30, tolerance=50 → within tolerance → hold at 0
         await coordinator._run_automatic(
             grid_power=30, solar_power=0, battery_soc=50
         )
         assert coordinator._current_feed_in_power == 0
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_converges_over_cycles(self, coordinator, mock_hass):
+        """Multiple cycles gradually approach target feed-in."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 0
+
+        # Simulate 5 cycles with consistent high grid import
+        for i in range(5):
+            await coordinator._run_automatic(
+                grid_power=500, solar_power=0, battery_soc=50
+            )
+        # After 5 cycles: 0 → 50 → 100 → 150 → 200 → 250
+        assert coordinator._current_feed_in_power == 250
 
 
 # ── Solar surplus detection ──────────────────────────────────────────
