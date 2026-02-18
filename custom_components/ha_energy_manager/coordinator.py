@@ -380,26 +380,46 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 self._log_decision(LOG_POWER_ADJUST, log_reason)
             return
 
-        # Feed-in > 0: activate discharge switch and PS mode first
-        await self._async_set_discharge_switch(True)
+        # Feed-in > 0: activate discharge switch and PS mode
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
 
         if self._last_feed_in_power == snapped:
             _LOGGER.debug(
                 "set_feed_in_power skipped: value %dW unchanged", snapped
             )
+            # Ensure discharge switch is on even if power unchanged
+            await self._async_set_discharge_switch(True)
             return
         old_power = self._last_feed_in_power or 0
         entity_id = self._entity_ids[CONF_CUSTOM_LOAD_POWER_NUMBER]
-        _LOGGER.debug(
-            "set_feed_in_power calling number.set_value: entity=%s, value=%d",
-            entity_id, snapped,
-        )
-        await self.hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": entity_id, "value": snapped},
-        )
+
+        # When reducing feed-in power, the EcoFlow PowerStream may not
+        # accept a lower custom_load_power while actively discharging.
+        # Cycle the discharge switch off → set new value → switch on.
+        if old_power > 0 and snapped < old_power:
+            _LOGGER.debug(
+                "set_feed_in_power reducing: cycling discharge switch for %s, %d → %d",
+                entity_id, old_power, snapped,
+            )
+            await self._async_set_discharge_switch(False)
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": snapped},
+            )
+            await self._async_set_discharge_switch(True)
+        else:
+            _LOGGER.debug(
+                "set_feed_in_power calling number.set_value: entity=%s, value=%d",
+                entity_id, snapped,
+            )
+            await self._async_set_discharge_switch(True)
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": snapped},
+            )
+
         self._last_feed_in_power = snapped
         self._current_feed_in_power = snapped
 
