@@ -61,5 +61,8 @@ FEED_IN_STATIC = "static"
 PS_MODE_PRIORITIZE_STORAGE = "Prioritize power storage"
 PS_MODE_PRIORITIZE_SUPPLY = "Prioritize power supply"
 
+# Logging
+DEFAULT_LOG_BUFFER_SIZE = 100
+
 # Platforms
 PLATFORMS = ["sensor", "select", "number", "switch"]
