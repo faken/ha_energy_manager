@@ -53,6 +53,7 @@ async def async_setup_entry(
                 name="Charge Power",
                 unique_suffix="charge_power",
             ),
+            EnergyManagerDecisionLogSensor(coordinator, entry),
         ]
     )
 
@@ -140,3 +141,52 @@ class EnergyManagerSocSensor(
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.battery_soc
+
+
+class EnergyManagerDecisionLogSensor(
+    CoordinatorEntity[EnergyManagerCoordinator], SensorEntity
+):
+    """Sensor showing the decision log with full history in attributes."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "decision_log"
+
+    def __init__(
+        self,
+        coordinator: EnergyManagerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_decision_log"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the last decision reason."""
+        if self.coordinator.data is None:
+            return None
+        entries = self.coordinator.data.log_entries
+        if not entries:
+            return "No decisions yet"
+        return entries[-1].get("reason", "")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return the full log buffer as attributes."""
+        if self.coordinator.data is None:
+            return {}
+        entries = self.coordinator.data.log_entries
+        last = entries[-1] if entries else {}
+        return {
+            "last_event": last.get("event", ""),
+            "last_timestamp": last.get("timestamp", ""),
+            "last_fsm_state": last.get("fsm_state", ""),
+            "last_mode": last.get("mode", ""),
+            "last_grid_power": last.get("grid_power", 0),
+            "last_solar_power": last.get("solar_power", 0),
+            "last_battery_soc": last.get("battery_soc", 0),
+            "last_charge_power": last.get("charge_power", 0),
+            "last_feed_in_power": last.get("feed_in_power", 0),
+            "entry_count": len(entries),
+            "entries": entries,
+        }
