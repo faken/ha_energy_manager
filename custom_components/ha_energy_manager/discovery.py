@@ -33,21 +33,29 @@ def _match_entity(entity_id: str, patterns: list[str]) -> bool:
     return any(p in lower for p in patterns)
 
 
+def _find_matching(
+    candidates: list[str],
+    patterns: list[str],
+) -> str | None:
+    """Find the first entity matching any pattern."""
+    for entity_id in candidates:
+        if _match_entity(entity_id, patterns):
+            return entity_id
+    return None
+
+
 async def async_discover_control_entities(
     hass: HomeAssistant,
     config_data: dict[str, Any],
 ) -> dict[str, str]:
-    """Discover EcoFlow control entities based on configured sensor/switch entities.
+    """Discover EcoFlow control entities.
 
-    Uses the device registry to find sibling entities on the same devices,
-    then matches them by known EcoFlow naming patterns.
+    Strategy:
+    1. Find devices from configured sensor/switch entities
+    2. Search sibling entities on those devices first
+    3. If not all found, fall back to searching ALL entities in the system
 
-    Returns a dict with discovered entity IDs:
-      - CONF_MAX_CHARGE_POWER_NUMBER
-      - CONF_CUSTOM_LOAD_POWER_NUMBER
-      - CONF_POWER_SUPPLY_MODE_SELECT
-
-    Raises ConfigEntryNotReady if required entities cannot be found.
+    Returns a dict with discovered entity IDs.
     """
     registry = er.async_get(hass)
 
@@ -76,47 +84,67 @@ async def async_discover_control_entities(
         device_ids,
     )
 
-    # Collect all entities belonging to those devices
-    candidate_numbers: list[str] = []
-    candidate_selects: list[str] = []
+    # Collect candidates from device siblings
+    device_numbers: list[str] = []
+    device_selects: list[str] = []
+    # Also collect ALL entities as fallback
+    all_numbers: list[str] = []
+    all_selects: list[str] = []
 
     for entry in registry.entities.values():
-        if entry.device_id not in device_ids:
-            continue
         if entry.domain == "number":
-            candidate_numbers.append(entry.entity_id)
+            all_numbers.append(entry.entity_id)
+            if entry.device_id in device_ids:
+                device_numbers.append(entry.entity_id)
         elif entry.domain == "select":
-            candidate_selects.append(entry.entity_id)
+            all_selects.append(entry.entity_id)
+            if entry.device_id in device_ids:
+                device_selects.append(entry.entity_id)
 
     _LOGGER.debug(
-        "Auto-discovery candidates: %d numbers, %d selects",
-        len(candidate_numbers),
-        len(candidate_selects),
+        "Auto-discovery candidates: device(%d numbers, %d selects), "
+        "all(%d numbers, %d selects)",
+        len(device_numbers),
+        len(device_selects),
+        len(all_numbers),
+        len(all_selects),
     )
 
-    # Match patterns
+    # Try device siblings first, then fall back to all entities
     discovered: dict[str, str] = {}
 
     # Max charge power number
-    for entity_id in candidate_numbers:
-        if _match_entity(entity_id, _CHARGE_POWER_PATTERNS):
-            discovered[CONF_MAX_CHARGE_POWER_NUMBER] = entity_id
-            _LOGGER.info("Auto-discovered charge power: %s", entity_id)
-            break
+    match = _find_matching(device_numbers, _CHARGE_POWER_PATTERNS)
+    if not match:
+        match = _find_matching(all_numbers, _CHARGE_POWER_PATTERNS)
+        if match:
+            _LOGGER.info("Auto-discovered charge power (global search): %s", match)
+    else:
+        _LOGGER.info("Auto-discovered charge power (device): %s", match)
+    if match:
+        discovered[CONF_MAX_CHARGE_POWER_NUMBER] = match
 
     # Custom load power number
-    for entity_id in candidate_numbers:
-        if _match_entity(entity_id, _CUSTOM_LOAD_PATTERNS):
-            discovered[CONF_CUSTOM_LOAD_POWER_NUMBER] = entity_id
-            _LOGGER.info("Auto-discovered custom load power: %s", entity_id)
-            break
+    match = _find_matching(device_numbers, _CUSTOM_LOAD_PATTERNS)
+    if not match:
+        match = _find_matching(all_numbers, _CUSTOM_LOAD_PATTERNS)
+        if match:
+            _LOGGER.info("Auto-discovered custom load power (global search): %s", match)
+    else:
+        _LOGGER.info("Auto-discovered custom load power (device): %s", match)
+    if match:
+        discovered[CONF_CUSTOM_LOAD_POWER_NUMBER] = match
 
     # Power supply mode select
-    for entity_id in candidate_selects:
-        if _match_entity(entity_id, _PS_MODE_PATTERNS):
-            discovered[CONF_POWER_SUPPLY_MODE_SELECT] = entity_id
-            _LOGGER.info("Auto-discovered power supply mode: %s", entity_id)
-            break
+    match = _find_matching(device_selects, _PS_MODE_PATTERNS)
+    if not match:
+        match = _find_matching(all_selects, _PS_MODE_PATTERNS)
+        if match:
+            _LOGGER.info("Auto-discovered power supply mode (global search): %s", match)
+    else:
+        _LOGGER.info("Auto-discovered power supply mode (device): %s", match)
+    if match:
+        discovered[CONF_POWER_SUPPLY_MODE_SELECT] = match
 
     # Log what was not found
     missing = []
@@ -132,8 +160,8 @@ async def async_discover_control_entities(
             "Auto-discovery could not find: %s. "
             "Available number entities: %s. Available select entities: %s",
             missing,
-            candidate_numbers,
-            candidate_selects,
+            all_numbers,
+            all_selects,
         )
 
     return discovered
