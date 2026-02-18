@@ -440,7 +440,6 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             await self._run_hold()
             return
 
-        await self._async_set_charge_switch(True)
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
@@ -449,21 +448,35 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         current = self._current_charge_power or min_power
         if grid_power > deadband:
             new_power = current - step
+            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+                f"reducing charge {current:.0f}W → {clamped:.0f}W"
             )
         elif grid_power < -deadband:
             new_power = current + step
+            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+                f"increasing charge {current:.0f}W → {clamped:.0f}W"
             )
         else:
             new_power = current
             reason = ""  # No change, no log
 
-        new_power = max(min(new_power, max_power), min_power)
+        # Allow ramping down to 0
+        new_power = max(min(new_power, max_power), 0)
+
+        # If below min_power but > 0, snap to 0 (avoid invalid range)
+        if 0 < new_power < min_power:
+            new_power = 0
+            reason = (
+                f"Charge power {current:.0f}W below minimum {min_power:.0f}W, "
+                f"stopping solar charge"
+            )
+
+        if new_power > 0:
+            await self._async_set_charge_switch(True)
         await self._async_set_charge_power(new_power, reason=reason)
         self._fsm_state = STATE_CHARGE
 
@@ -487,7 +500,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             OPT_GRID_POWER_TOLERANCE_DISCHARGE, DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE
         )
 
-        has_solar_surplus = solar_power > min_power
+        # Solar surplus means we are exporting to grid (grid_power < 0)
+        # OR solar covers household AND has enough left to charge at min_power
+        # Simple check: if grid_power is negative we definitely have surplus,
+        # or if solar is high enough that charging wouldn't increase grid import
+        has_solar_surplus = grid_power < 0 or (solar_power > min_power and grid_power < deadband)
         dwell_ok = self._dwell_time_exceeded()
 
         if self._fsm_state == STATE_CHARGE:
@@ -523,7 +540,6 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: CHARGE state."""
-        await self._async_set_charge_switch(True)
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
@@ -532,21 +548,35 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         current = self._current_charge_power or min_power
         if grid_power > deadband:
             new_power = current - step
+            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+                f"reducing charge {current:.0f}W → {clamped:.0f}W"
             )
         elif grid_power < -deadband:
             new_power = current + step
+            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+                f"increasing charge {current:.0f}W → {clamped:.0f}W"
             )
         else:
             new_power = current
             reason = ""
 
-        new_power = max(min(new_power, max_power), min_power)
+        # Allow ramping down to 0 — _async_set_charge_power(0) turns off switch
+        new_power = max(min(new_power, max_power), 0)
+
+        # If ramped down to below min_power but > 0, snap to 0 (avoid invalid range)
+        if 0 < new_power < min_power:
+            new_power = 0
+            reason = (
+                f"Charge power {current:.0f}W below minimum {min_power:.0f}W, "
+                f"stopping charge"
+            )
+
+        if new_power > 0:
+            await self._async_set_charge_switch(True)
         await self._async_set_charge_power(new_power, reason=reason)
 
         # State transitions
@@ -562,7 +592,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             if not has_solar_surplus:
                 self._set_fsm_state(
                     STATE_HOLD,
-                    f"No solar surplus (solar {solar_power:.0f}W < min {min_power:.0f}W)",
+                    f"No solar surplus (grid import {grid_power:.0f}W, solar {solar_power:.0f}W)",
                 )
 
     async def _auto_hold(
