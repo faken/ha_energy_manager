@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Sensors & Switches",
-        "description": "Select the sensors and switches from your EcoFlow system.",
+        "title": "Configure Energy Manager",
+        "description": "Select the sensors and switches from your EcoFlow system.\n\nThe integration will automatically detect the matching control entities (charge power, feed-in power, PowerStream mode) from the same devices.",
         "data": {
           "grid_power_sensor": "Grid Power",
           "solar_power_sensor": "Solar Power",
@@ -12,25 +12,11 @@
           "discharge_switch": "Discharge Switch"
         },
         "data_description": {
-          "grid_power_sensor": "Current grid import (+) / export (−) in watts. Usually from your smart meter or energy monitor (e.g. sensor.smart_meter_power).",
-          "solar_power_sensor": "Current solar production in watts (e.g. sensor.powerstream_solar_power or sensor.inverter_pv_power).",
+          "grid_power_sensor": "Current grid import (+) / export (−) in watts. Usually from your smart meter or energy monitor.",
+          "solar_power_sensor": "Current solar production in watts from your PowerStream or inverter.",
           "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level).",
           "charge_switch": "Switch that enables AC charging of the battery (e.g. switch.delta_2_max_ac_charging).",
-          "discharge_switch": "Switch that enables discharge / feed-in from the battery (e.g. switch.delta_2_max_discharge_switch or switch.powerstream_custom_load_enabled)."
-        }
-      },
-      "controls": {
-        "title": "Control Entities",
-        "description": "Select the entities that the integration uses to control charging power, feed-in power, and the PowerStream mode.\n\nThese are number/select entities provided by your EcoFlow integration.",
-        "data": {
-          "power_supply_mode_select": "PowerStream Mode",
-          "max_charge_power_number": "Max Charge Power",
-          "custom_load_power_number": "Custom Load Power (Feed-in)"
-        },
-        "data_description": {
-          "power_supply_mode_select": "PowerStream power supply priority selector. Must have options 'Prioritize power supply' and 'Prioritize power storage' (e.g. select.powerstream_power_supply_mode). ⚠️ This is NOT the AC timeout select!",
-          "max_charge_power_number": "Controls the maximum AC charging speed in watts (e.g. number.delta_2_max_ac_charging_power). The integration adjusts this value to regulate charge speed.",
-          "custom_load_power_number": "Controls how many watts are discharged from the battery into your home grid (e.g. number.powerstream_custom_load_power). The integration adjusts this value for feed-in."
+          "discharge_switch": "Switch that enables discharge / feed-in from the battery (e.g. switch.powerstream_custom_load_enabled)."
         }
       }
     }
