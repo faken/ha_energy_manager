@@ -716,11 +716,18 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
         # Calculate feed-in power
         if feed_in_mode == FEED_IN_DYNAMIC:
-            target = grid_power - grid_tolerance
+            # The grid_power reading already includes our current feed-in effect.
+            # To find the actual household consumption, add back our current feed-in:
+            # consumption = grid_power + current_feed_in
+            # Then the new target = consumption - grid_tolerance
+            consumption = grid_power + self._current_feed_in_power
+            target = consumption - grid_tolerance
             feed_in = max(min(target, max_feed_in), 0)
             reason = (
-                f"Dynamic feed-in: grid {grid_power:.0f}W - tolerance {grid_tolerance:.0f}W "
-                f"= target {target:.0f}W, clamped to {feed_in:.0f}W"
+                f"Dynamic feed-in: consumption {consumption:.0f}W "
+                f"(grid {grid_power:.0f}W + feed-in {self._current_feed_in_power:.0f}W) "
+                f"- tolerance {grid_tolerance:.0f}W = target {target:.0f}W, "
+                f"clamped to {feed_in:.0f}W"
             )
         else:
             feed_in = min(feed_in_static, max_feed_in)
@@ -740,8 +747,12 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             return
 
         if dwell_ok and has_solar_surplus:
+            # Only switch to CHARGE if there is genuine solar production,
+            # not just negative grid caused by our own feed-in.
             solar = self._current_solar_power
-            self._set_fsm_state(
-                STATE_CHARGE,
-                f"Solar surplus detected ({solar:.0f}W), switching to charge",
-            )
+            min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
+            if solar >= min_power:
+                self._set_fsm_state(
+                    STATE_CHARGE,
+                    f"Solar surplus detected ({solar:.0f}W >= {min_power:.0f}W), switching to charge",
+                )
