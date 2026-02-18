@@ -58,7 +58,8 @@ from .const import (
     OPT_UPDATE_INTERVAL,
 )
 
-ENTITY_SCHEMA = vol.Schema(
+# Step 1: Sensors & Switches
+STEP_SENSORS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_GRID_POWER_SENSOR): EntitySelector(
             EntitySelectorConfig(domain="sensor")
@@ -75,6 +76,12 @@ ENTITY_SCHEMA = vol.Schema(
         vol.Required(CONF_DISCHARGE_SWITCH): EntitySelector(
             EntitySelectorConfig(domain="switch")
         ),
+    }
+)
+
+# Step 2: Control entities (number, select)
+STEP_CONTROLS_SCHEMA = vol.Schema(
+    {
         vol.Required(CONF_POWER_SUPPLY_MODE_SELECT): EntitySelector(
             EntitySelectorConfig(domain="select")
         ),
@@ -259,14 +266,32 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._data: dict[str, Any] = {}
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the entity selection step."""
+        """Step 1: Select sensors and switches."""
         if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_controls()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=STEP_SENSORS_SCHEMA,
+        )
+
+    async def async_step_controls(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 2: Select control entities (number, select)."""
+        if user_input is not None:
+            self._data.update(user_input)
             return self.async_create_entry(
                 title="Energy Manager",
-                data=user_input,
+                data=self._data,
                 options={
                     OPT_FEED_IN_MODE: DEFAULT_FEED_IN_MODE,
                     OPT_FEED_IN_STATIC_POWER: DEFAULT_FEED_IN_STATIC_POWER,
@@ -284,8 +309,8 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=ENTITY_SCHEMA,
+            step_id="controls",
+            data_schema=STEP_CONTROLS_SCHEMA,
         )
 
     @staticmethod
