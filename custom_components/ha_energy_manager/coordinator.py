@@ -306,10 +306,19 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_ps_mode = mode
 
     async def _async_set_charge_power(self, value: float, reason: str = "") -> None:
-        """Set the max AC charging power (snapped to step)."""
-        min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
+        """Set the max AC charging power (snapped to step).
+
+        When value is 0, the charge switch is automatically turned off.
+        When value is > 0, the value is clamped between min and max charge power.
+        """
         max_power = self._get_option(OPT_MAX_CHARGE_POWER, DEFAULT_MAX_CHARGE_POWER)
-        snapped = self._snap_to_step(max(min(value, max_power), min_power))
+        if value <= 0:
+            snapped = 0
+            # Charge power 0 means charge switch must be off
+            await self._async_set_charge_switch(False)
+        else:
+            min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
+            snapped = self._snap_to_step(max(min(value, max_power), min_power))
         if self._last_charge_power == snapped:
             return
         old_power = self._last_charge_power
@@ -406,14 +415,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
     async def _run_hold(self) -> None:
         """Execute hold mode logic."""
-        min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
-
-        await self._async_set_charge_switch(False)
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
         await self._async_set_charge_power(
-            min_power,
-            reason=f"Hold mode, charge at min {min_power}W",
+            0,
+            reason="Hold mode, charge power 0W, switch off",
         )
         await self._async_set_feed_in_power(0)
         self._fsm_state = STATE_HOLD
@@ -568,15 +574,13 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: HOLD state."""
-        min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
         )
 
-        await self._async_set_charge_switch(False)
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
-        await self._async_set_charge_power(min_power)
+        await self._async_set_charge_power(0)
         await self._async_set_feed_in_power(0)
 
         # State transitions
@@ -609,7 +613,6 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: DISCHARGE state."""
-        await self._async_set_charge_switch(False)
         await self._async_set_discharge_switch(True)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
 
@@ -627,8 +630,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         await self._async_set_feed_in_power(feed_in, reason=reason)
 
-        min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
-        await self._async_set_charge_power(min_power)
+        # No charging during discharge — power 0 also turns off charge switch
+        await self._async_set_charge_power(0)
 
         # State transitions
         if battery_soc <= min_soc:
