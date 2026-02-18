@@ -259,7 +259,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             old_state = self._fsm_state
             self._fsm_state = new_state
             self._fsm_state_entered_at = time.monotonic()
-            # Reset last-sent values to force re-application of switch/mode states
+            # Reset ALL last-sent values to force re-application on state change
+            self._last_charge_power = None
+            self._last_feed_in_power = None
             self._last_charge_switch = None
             self._last_discharge_switch = None
             self._last_ps_mode = None
@@ -346,6 +348,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
         snapped = self._snap_to_step(max(min(value, max_feed_in), 0), step=50)
 
+        _LOGGER.debug(
+            "set_feed_in_power called: value=%.1f, snapped=%d, last=%s, max=%d",
+            value, snapped, self._last_feed_in_power, max_feed_in,
+        )
+
         # Control discharge switch and PowerStream mode based on feed-in power
         if snapped > 0:
             await self._async_set_discharge_switch(True)
@@ -354,9 +361,16 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             await self._async_set_discharge_switch(False)
 
         if self._last_feed_in_power == snapped:
+            _LOGGER.debug(
+                "set_feed_in_power skipped: value %dW unchanged", snapped
+            )
             return
         old_power = self._last_feed_in_power
         entity_id = self._entity_ids[CONF_CUSTOM_LOAD_POWER_NUMBER]
+        _LOGGER.debug(
+            "set_feed_in_power calling number.set_value: entity=%s, value=%d",
+            entity_id, snapped,
+        )
         await self.hass.services.async_call(
             "number",
             "set_value",
@@ -649,6 +663,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: DISCHARGE state."""
+        _LOGGER.debug(
+            "auto_discharge: grid=%.0f, soc=%.0f, mode=%s, tolerance=%.0f, max_feed_in=%.0f",
+            grid_power, battery_soc, feed_in_mode, grid_tolerance, max_feed_in,
+        )
         # Calculate feed-in power
         if feed_in_mode == FEED_IN_DYNAMIC:
             target = grid_power - grid_tolerance
