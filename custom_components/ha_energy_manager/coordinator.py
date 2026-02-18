@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-
-from datetime import timedelta
 
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_DEADBAND,
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_STATIC_POWER,
+    DEFAULT_LOG_BUFFER_SIZE,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_GRID_FEED_IN_POWER,
     DEFAULT_MAX_GRID_IMPORT_SOLAR_CHARGE,
@@ -61,6 +62,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Log event types
+LOG_STATE_TRANSITION = "state_transition"
+LOG_POWER_ADJUST = "power_adjust"
+LOG_MODE_CHANGE = "mode_change"
+LOG_ENABLED_CHANGE = "enabled_change"
+
 
 @dataclass
 class EnergyManagerData:
@@ -74,6 +81,7 @@ class EnergyManagerData:
     feed_in_power: float = 0.0
     charge_power: float = 0.0
     is_enabled: bool = True
+    log_entries: list[dict] = field(default_factory=list)
 
 
 class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
@@ -103,6 +111,14 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._current_charge_power: float = 0.0
         self._current_feed_in_power: float = 0.0
 
+        # Current sensor readings (updated each cycle for logging context)
+        self._current_grid_power: float = 0.0
+        self._current_solar_power: float = 0.0
+        self._current_battery_soc: float = 0.0
+
+        # Decision log ring buffer
+        self._log_buffer: deque[dict] = deque(maxlen=DEFAULT_LOG_BUFFER_SIZE)
+
         interval = config_entry.options.get(OPT_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
         super().__init__(
             hass,
@@ -110,6 +126,47 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             name=DOMAIN,
             update_interval=timedelta(seconds=interval),
         )
+
+    # ── Logging ──────────────────────────────────────────────────────────
+
+    @property
+    def log_entries(self) -> list[dict]:
+        """Return the current log buffer as a list."""
+        return list(self._log_buffer)
+
+    def _log_decision(self, event: str, reason: str) -> None:
+        """Record a decision to the ring buffer, system log, and HA logbook."""
+        entry = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "event": event,
+            "mode": self._active_mode,
+            "fsm_state": self._fsm_state,
+            "grid_power": round(self._current_grid_power, 1),
+            "solar_power": round(self._current_solar_power, 1),
+            "battery_soc": round(self._current_battery_soc, 1),
+            "charge_power": self._current_charge_power,
+            "feed_in_power": self._current_feed_in_power,
+            "reason": reason,
+        }
+        self._log_buffer.append(entry)
+
+        # System log
+        _LOGGER.info("Energy Manager [%s] %s", event, reason)
+
+        # Fire HA logbook entry (non-blocking)
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                "logbook",
+                "log",
+                {
+                    "name": "Energy Manager",
+                    "message": reason,
+                    "domain": DOMAIN,
+                },
+            )
+        )
+
+    # ── Helpers ──────────────────────────────────────────────────────────
 
     def _get_option(self, key: str, default: Any) -> Any:
         """Get an option value, falling back to default."""
@@ -123,6 +180,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     @active_mode.setter
     def active_mode(self, mode: str) -> None:
         """Set the operating mode and reset FSM state."""
+        old_mode = self._active_mode
         self._active_mode = mode
         self._fsm_state = STATE_HOLD
         self._fsm_state_entered_at = time.monotonic()
@@ -133,6 +191,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_discharge_switch = None
         self._last_ps_mode = None
 
+        self._log_decision(
+            LOG_MODE_CHANGE,
+            f"Mode changed: {old_mode} → {mode}",
+        )
+
     @property
     def is_enabled(self) -> bool:
         """Return whether the manager is enabled."""
@@ -141,6 +204,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     @is_enabled.setter
     def is_enabled(self, value: bool) -> None:
         """Set the enabled state."""
+        old_value = self._is_enabled
         self._is_enabled = value
         if not value:
             # Reset tracking when disabled
@@ -149,6 +213,12 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             self._last_charge_switch = None
             self._last_discharge_switch = None
             self._last_ps_mode = None
+
+        if old_value != value:
+            self._log_decision(
+                LOG_ENABLED_CHANGE,
+                f"Manager {'enabled' if value else 'disabled'}",
+            )
 
     def update_options(self) -> None:
         """Update coordinator settings from config entry options."""
@@ -183,18 +253,23 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         min_dwell = self._get_option(OPT_MIN_DWELL_TIME, DEFAULT_MIN_DWELL_TIME)
         return (time.monotonic() - self._fsm_state_entered_at) >= min_dwell
 
-    def _set_fsm_state(self, new_state: str) -> None:
-        """Transition to a new FSM state."""
+    def _set_fsm_state(self, new_state: str, reason: str) -> None:
+        """Transition to a new FSM state with reason logging."""
         if new_state != self._fsm_state:
-            _LOGGER.info(
-                "FSM transition: %s -> %s", self._fsm_state, new_state
-            )
+            old_state = self._fsm_state
             self._fsm_state = new_state
             self._fsm_state_entered_at = time.monotonic()
             # Reset last-sent values to force re-application of switch/mode states
             self._last_charge_switch = None
             self._last_discharge_switch = None
             self._last_ps_mode = None
+
+            self._log_decision(
+                LOG_STATE_TRANSITION,
+                f"FSM {old_state} → {new_state}: {reason}",
+            )
+
+    # ── Entity setters ───────────────────────────────────────────────────
 
     async def _async_set_charge_switch(self, on: bool) -> None:
         """Turn the charge switch on or off."""
@@ -230,13 +305,14 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
         self._last_ps_mode = mode
 
-    async def _async_set_charge_power(self, value: float) -> None:
+    async def _async_set_charge_power(self, value: float, reason: str = "") -> None:
         """Set the max AC charging power (snapped to step)."""
         min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
         max_power = self._get_option(OPT_MAX_CHARGE_POWER, DEFAULT_MAX_CHARGE_POWER)
         snapped = self._snap_to_step(max(min(value, max_power), min_power))
         if self._last_charge_power == snapped:
             return
+        old_power = self._last_charge_power
         entity_id = self._entity_ids[CONF_MAX_CHARGE_POWER_NUMBER]
         await self.hass.services.async_call(
             "number",
@@ -246,7 +322,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_charge_power = snapped
         self._current_charge_power = snapped
 
-    async def _async_set_feed_in_power(self, value: float) -> None:
+        log_reason = reason or f"Charge power {old_power}W → {snapped}W"
+        self._log_decision(LOG_POWER_ADJUST, log_reason)
+
+    async def _async_set_feed_in_power(self, value: float, reason: str = "") -> None:
         """Set the custom load (feed-in) power."""
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
@@ -254,6 +333,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         snapped = self._snap_to_step(max(min(value, max_feed_in), 0), step=50)
         if self._last_feed_in_power == snapped:
             return
+        old_power = self._last_feed_in_power
         entity_id = self._entity_ids[CONF_CUSTOM_LOAD_POWER_NUMBER]
         await self.hass.services.async_call(
             "number",
@@ -263,18 +343,27 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_feed_in_power = snapped
         self._current_feed_in_power = snapped
 
+        log_reason = reason or f"Feed-in power {old_power}W → {snapped}W"
+        self._log_decision(LOG_POWER_ADJUST, log_reason)
+
+    # ── Update cycle ─────────────────────────────────────────────────────
+
     async def _async_update_data(self) -> EnergyManagerData:
         """Fetch data and run control logic."""
-        # Read sensor values
-        grid_power = self._get_entity_state_float(
+        # Read sensor values and store for logging context
+        self._current_grid_power = self._get_entity_state_float(
             self._entity_ids[CONF_GRID_POWER_SENSOR]
         )
-        solar_power = self._get_entity_state_float(
+        self._current_solar_power = self._get_entity_state_float(
             self._entity_ids[CONF_SOLAR_POWER_SENSOR]
         )
-        battery_soc = self._get_entity_state_float(
+        self._current_battery_soc = self._get_entity_state_float(
             self._entity_ids[CONF_BATTERY_SOC_SENSOR]
         )
+
+        grid_power = self._current_grid_power
+        solar_power = self._current_solar_power
+        battery_soc = self._current_battery_soc
 
         # Run control logic if enabled
         if self._is_enabled:
@@ -296,7 +385,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             feed_in_power=self._current_feed_in_power,
             charge_power=self._current_charge_power,
             is_enabled=self._is_enabled,
+            log_entries=list(self._log_buffer),
         )
+
+    # ── Mode implementations ─────────────────────────────────────────────
 
     async def _run_forced_charge(self) -> None:
         """Execute forced charge mode logic."""
@@ -306,7 +398,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         await self._async_set_feed_in_power(0)
-        await self._async_set_charge_power(max_power)
+        await self._async_set_charge_power(
+            max_power,
+            reason=f"Forced charge at max {max_power}W",
+        )
         self._fsm_state = STATE_CHARGE
 
     async def _run_hold(self) -> None:
@@ -316,7 +411,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         await self._async_set_charge_switch(False)
         await self._async_set_discharge_switch(False)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
-        await self._async_set_charge_power(min_power)
+        await self._async_set_charge_power(
+            min_power,
+            reason=f"Hold mode, charge at min {min_power}W",
+        )
         await self._async_set_feed_in_power(0)
         self._fsm_state = STATE_HOLD
 
@@ -329,6 +427,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         # If no solar available, behave like hold
         if solar_power < min_power:
+            self._log_decision(
+                LOG_STATE_TRANSITION,
+                f"Solar mode → hold: solar {solar_power:.0f}W < min charge {min_power}W",
+            )
             await self._run_hold()
             return
 
@@ -340,17 +442,23 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         # Gradual adjustment: one step per cycle
         current = self._current_charge_power or min_power
         if grid_power > deadband:
-            # We're pulling from grid — reduce charge power
             new_power = current - step
+            reason = (
+                f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
+                f"reducing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+            )
         elif grid_power < -deadband:
-            # We're exporting to grid — can increase charge power
             new_power = current + step
+            reason = (
+                f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
+                f"increasing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+            )
         else:
-            # Within deadband — stable
             new_power = current
+            reason = ""  # No change, no log
 
         new_power = max(min(new_power, max_power), min_power)
-        await self._async_set_charge_power(new_power)
+        await self._async_set_charge_power(new_power, reason=reason)
         self._fsm_state = STATE_CHARGE
 
     async def _run_automatic(
@@ -417,27 +525,39 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         # Gradual charge power adjustment
         current = self._current_charge_power or min_power
         if grid_power > deadband:
-            # Pulling too much from grid — reduce
             new_power = current - step
+            reason = (
+                f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
+                f"reducing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+            )
         elif grid_power < -deadband:
-            # Solar surplus available — increase
             new_power = current + step
+            reason = (
+                f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
+                f"increasing charge {current:.0f}W → {max(min(new_power, max_power), min_power):.0f}W"
+            )
         else:
             new_power = current
+            reason = ""
 
         new_power = max(min(new_power, max_power), min_power)
-        await self._async_set_charge_power(new_power)
+        await self._async_set_charge_power(new_power, reason=reason)
 
         # State transitions
         if dwell_ok:
-            # Transition to DISCHARGE if high grid consumption and battery has charge
             if battery_soc > min_soc and grid_power > max_feed_in:
-                self._set_fsm_state(STATE_DISCHARGE)
+                self._set_fsm_state(
+                    STATE_DISCHARGE,
+                    f"High grid consumption {grid_power:.0f}W > {max_feed_in:.0f}W, "
+                    f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                )
                 return
 
-            # Transition to HOLD if no solar surplus
             if not has_solar_surplus:
-                self._set_fsm_state(STATE_HOLD)
+                self._set_fsm_state(
+                    STATE_HOLD,
+                    f"No solar surplus (solar {solar_power:.0f}W < min {min_power:.0f}W)",
+                )
 
     async def _auto_hold(
         self,
@@ -461,14 +581,20 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         # State transitions
         if dwell_ok:
-            # Transition to CHARGE if solar surplus
             if has_solar_surplus:
-                self._set_fsm_state(STATE_CHARGE)
+                solar = self._current_solar_power
+                self._set_fsm_state(
+                    STATE_CHARGE,
+                    f"Solar surplus detected ({solar:.0f}W available)",
+                )
                 return
 
-            # Transition to DISCHARGE if high grid consumption and battery has charge
             if battery_soc > min_soc and grid_power > max_feed_in:
-                self._set_fsm_state(STATE_DISCHARGE)
+                self._set_fsm_state(
+                    STATE_DISCHARGE,
+                    f"High grid consumption {grid_power:.0f}W > {max_feed_in:.0f}W, "
+                    f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                )
 
     async def _auto_discharge(
         self,
@@ -489,22 +615,32 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         # Calculate feed-in power
         if feed_in_mode == FEED_IN_DYNAMIC:
-            # Dynamic: try to cover household consumption, leaving grid_tolerance
             target = grid_power - grid_tolerance
             feed_in = max(min(target, max_feed_in), 0)
+            reason = (
+                f"Dynamic feed-in: grid {grid_power:.0f}W - tolerance {grid_tolerance:.0f}W "
+                f"= target {target:.0f}W, clamped to {feed_in:.0f}W"
+            )
         else:
-            # Static: fixed feed-in value
             feed_in = min(feed_in_static, max_feed_in)
+            reason = f"Static feed-in: {feed_in:.0f}W"
 
-        await self._async_set_feed_in_power(feed_in)
+        await self._async_set_feed_in_power(feed_in, reason=reason)
 
         min_power = self._get_option(OPT_MIN_CHARGE_POWER, DEFAULT_MIN_CHARGE_POWER)
         await self._async_set_charge_power(min_power)
 
         # State transitions
         if battery_soc <= min_soc:
-            self._set_fsm_state(STATE_HOLD)
+            self._set_fsm_state(
+                STATE_HOLD,
+                f"Battery SOC {battery_soc:.0f}% <= min {min_soc:.0f}%, stopping discharge",
+            )
             return
 
         if dwell_ok and has_solar_surplus:
-            self._set_fsm_state(STATE_CHARGE)
+            solar = self._current_solar_power
+            self._set_fsm_state(
+                STATE_CHARGE,
+                f"Solar surplus detected ({solar:.0f}W), switching to charge",
+            )
