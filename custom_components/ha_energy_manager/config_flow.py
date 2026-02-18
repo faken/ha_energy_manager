@@ -23,11 +23,8 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_CHARGE_SWITCH,
-    CONF_CUSTOM_LOAD_POWER_NUMBER,
     CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
-    CONF_MAX_CHARGE_POWER_NUMBER,
-    CONF_POWER_SUPPLY_MODE_SELECT,
     CONF_SOLAR_POWER_SENSOR,
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
@@ -58,8 +55,7 @@ from .const import (
     OPT_UPDATE_INTERVAL,
 )
 
-# Step 1: Sensors & Switches
-STEP_SENSORS_SCHEMA = vol.Schema(
+ENTITY_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_GRID_POWER_SENSOR): EntitySelector(
             EntitySelectorConfig(domain="sensor")
@@ -75,21 +71,6 @@ STEP_SENSORS_SCHEMA = vol.Schema(
         ),
         vol.Required(CONF_DISCHARGE_SWITCH): EntitySelector(
             EntitySelectorConfig(domain="switch")
-        ),
-    }
-)
-
-# Step 2: Control entities (number, select)
-STEP_CONTROLS_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_POWER_SUPPLY_MODE_SELECT): EntitySelector(
-            EntitySelectorConfig(domain="select")
-        ),
-        vol.Required(CONF_MAX_CHARGE_POWER_NUMBER): EntitySelector(
-            EntitySelectorConfig(domain="number")
-        ),
-        vol.Required(CONF_CUSTOM_LOAD_POWER_NUMBER): EntitySelector(
-            EntitySelectorConfig(domain="number")
         ),
     }
 )
@@ -266,32 +247,14 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self) -> None:
-        """Initialize the config flow."""
-        self._data: dict[str, Any] = {}
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 1: Select sensors and switches."""
+        """Handle the entity selection step."""
         if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_controls()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_SENSORS_SCHEMA,
-        )
-
-    async def async_step_controls(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Step 2: Select control entities (number, select)."""
-        if user_input is not None:
-            self._data.update(user_input)
             return self.async_create_entry(
                 title="Energy Manager",
-                data=self._data,
+                data=user_input,
                 options={
                     OPT_FEED_IN_MODE: DEFAULT_FEED_IN_MODE,
                     OPT_FEED_IN_STATIC_POWER: DEFAULT_FEED_IN_STATIC_POWER,
@@ -309,8 +272,8 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         return self.async_show_form(
-            step_id="controls",
-            data_schema=STEP_CONTROLS_SCHEMA,
+            step_id="user",
+            data_schema=ENTITY_SCHEMA,
         )
 
     @staticmethod
