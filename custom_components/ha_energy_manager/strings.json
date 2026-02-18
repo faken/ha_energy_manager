@@ -2,27 +2,35 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure Energy Manager",
-        "description": "Select the entities for your EcoFlow battery system.",
+        "title": "Sensors & Switches",
+        "description": "Select the sensors and switches from your EcoFlow system.",
         "data": {
-          "grid_power_sensor": "Grid Power Sensor",
-          "solar_power_sensor": "Solar Power Sensor",
-          "battery_soc_sensor": "Battery SOC Sensor",
+          "grid_power_sensor": "Grid Power",
+          "solar_power_sensor": "Solar Power",
+          "battery_soc_sensor": "Battery SOC",
           "charge_switch": "Charge Switch",
-          "discharge_switch": "Discharge Switch",
-          "power_supply_mode_select": "PowerStream Mode Select",
-          "max_charge_power_number": "Max Charge Power Number",
-          "custom_load_power_number": "Custom Load Power Number"
+          "discharge_switch": "Discharge Switch"
         },
         "data_description": {
-          "grid_power_sensor": "Sensor showing current grid import (positive) / export (negative) in watts.",
-          "solar_power_sensor": "Sensor showing current solar production in watts.",
-          "battery_soc_sensor": "Sensor showing battery state of charge in percent.",
-          "charge_switch": "Switch to enable/disable battery charging.",
-          "discharge_switch": "Switch to enable/disable battery discharging (feed-in).",
-          "power_supply_mode_select": "PowerStream power supply mode selector.",
-          "max_charge_power_number": "Number entity to set max AC charging power.",
-          "custom_load_power_number": "Number entity to set custom load (feed-in) power."
+          "grid_power_sensor": "Current grid import (+) / export (−) in watts. Usually from your smart meter or energy monitor (e.g. sensor.smart_meter_power).",
+          "solar_power_sensor": "Current solar production in watts (e.g. sensor.powerstream_solar_power or sensor.inverter_pv_power).",
+          "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level).",
+          "charge_switch": "Switch that enables AC charging of the battery (e.g. switch.delta_2_max_ac_charging).",
+          "discharge_switch": "Switch that enables discharge / feed-in from the battery (e.g. switch.delta_2_max_discharge_switch or switch.powerstream_custom_load_enabled)."
+        }
+      },
+      "controls": {
+        "title": "Control Entities",
+        "description": "Select the entities that the integration uses to control charging power, feed-in power, and the PowerStream mode.\n\nThese are number/select entities provided by your EcoFlow integration.",
+        "data": {
+          "power_supply_mode_select": "PowerStream Mode",
+          "max_charge_power_number": "Max Charge Power",
+          "custom_load_power_number": "Custom Load Power (Feed-in)"
+        },
+        "data_description": {
+          "power_supply_mode_select": "PowerStream power supply priority selector. Must have options 'Prioritize power supply' and 'Prioritize power storage' (e.g. select.powerstream_power_supply_mode). ⚠️ This is NOT the AC timeout select!",
+          "max_charge_power_number": "Controls the maximum AC charging speed in watts (e.g. number.delta_2_max_ac_charging_power). The integration adjusts this value to regulate charge speed.",
+          "custom_load_power_number": "Controls how many watts are discharged from the battery into your home grid (e.g. number.powerstream_custom_load_power). The integration adjusts this value for feed-in."
         }
       }
     }
@@ -50,13 +58,13 @@
           "feed_in_static_power": "Fixed feed-in power when using static mode.",
           "min_battery_soc": "Stop discharging when battery reaches this SOC.",
           "max_grid_feed_in_power": "Maximum power to feed into the home.",
-          "grid_power_tolerance_discharge": "Acceptable grid import while discharging.",
-          "max_grid_import_solar_charge": "Maximum grid import allowed during solar charging (0 = pure solar).",
+          "grid_power_tolerance_discharge": "Acceptable grid import while discharging. Higher = less grid import but less battery usage.",
+          "max_grid_import_solar_charge": "Maximum grid import allowed during solar charging (0 = pure solar only).",
           "max_charge_power": "Maximum battery charging power.",
-          "min_charge_power": "Minimum battery charging power.",
+          "min_charge_power": "Minimum battery charging power (below this, charging is stopped).",
           "update_interval": "How often the manager evaluates and adjusts (seconds).",
           "deadband": "Power deviation threshold before adjusting (prevents oscillation).",
-          "charge_power_step": "Step size for charge power adjustments (battery hardware constraint).",
+          "charge_power_step": "Step size for charge power adjustments per cycle (hardware constraint).",
           "min_dwell_time": "Minimum time to stay in a state before transitioning (seconds)."
         }
       }
