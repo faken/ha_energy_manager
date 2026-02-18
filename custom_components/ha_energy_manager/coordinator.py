@@ -89,10 +89,15 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
     config_entry: ConfigEntry
 
-    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        entity_ids: dict[str, str] | None = None,
+    ) -> None:
         """Initialize the coordinator."""
         self._config_entry = config_entry
-        self._entity_ids = config_entry.data
+        self._entity_ids = entity_ids if entity_ids is not None else dict(config_entry.data)
 
         # Internal FSM state
         self._fsm_state: str = STATE_HOLD
