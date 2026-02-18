@@ -324,7 +324,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             # because EcoFlow has a minimum value and rejects 0.
             await self._async_set_charge_switch(False)
             if self._last_charge_power != 0:
-                old_power = self._last_charge_power
+                old_power = self._last_charge_power or 0
                 self._last_charge_power = 0
                 self._current_charge_power = 0
                 log_reason = reason or f"Charge power {old_power}W → 0W (switch off)"
@@ -336,7 +336,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         snapped = self._snap_to_step(max(min(value, max_power), min_power))
         if self._last_charge_power == snapped:
             return
-        old_power = self._last_charge_power
+        old_power = self._last_charge_power or 0
         entity_id = self._entity_ids[CONF_MAX_CHARGE_POWER_NUMBER]
         await self.hass.services.async_call(
             "number",
@@ -372,7 +372,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             # entity because EcoFlow may reject it.
             await self._async_set_discharge_switch(False)
             if self._last_feed_in_power != 0:
-                old_power = self._last_feed_in_power
+                old_power = self._last_feed_in_power or 0
                 self._last_feed_in_power = 0
                 self._current_feed_in_power = 0
                 log_reason = reason or f"Feed-in power {old_power}W → 0W (switch off)"
@@ -388,7 +388,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 "set_feed_in_power skipped: value %dW unchanged", snapped
             )
             return
-        old_power = self._last_feed_in_power
+        old_power = self._last_feed_in_power or 0
         entity_id = self._entity_ids[CONF_CUSTOM_LOAD_POWER_NUMBER]
         _LOGGER.debug(
             "set_feed_in_power calling number.set_value: entity=%s, value=%d",
