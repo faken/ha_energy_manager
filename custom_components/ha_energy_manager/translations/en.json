@@ -1,0 +1,85 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Energy Manager",
+        "description": "Select the entities for your EcoFlow battery system.",
+        "data": {
+          "grid_power_sensor": "Grid Power Sensor",
+          "solar_power_sensor": "Solar Power Sensor",
+          "battery_soc_sensor": "Battery SOC Sensor",
+          "charge_switch": "Charge Switch",
+          "discharge_switch": "Discharge Switch",
+          "power_supply_mode_select": "PowerStream Mode Select",
+          "max_charge_power_number": "Max Charge Power Number",
+          "custom_load_power_number": "Custom Load Power Number"
+        },
+        "data_description": {
+          "grid_power_sensor": "Sensor showing current grid import (positive) / export (negative) in watts.",
+          "solar_power_sensor": "Sensor showing current solar production in watts.",
+          "battery_soc_sensor": "Sensor showing battery state of charge in percent.",
+          "charge_switch": "Switch to enable/disable battery charging.",
+          "discharge_switch": "Switch to enable/disable battery discharging (feed-in).",
+          "power_supply_mode_select": "PowerStream power supply mode selector.",
+          "max_charge_power_number": "Number entity to set max AC charging power.",
+          "custom_load_power_number": "Number entity to set custom load (feed-in) power."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy Manager Settings",
+        "data": {
+          "feed_in_mode": "Feed-in Mode",
+          "feed_in_static_power": "Static Feed-in Power",
+          "min_battery_soc": "Min Battery SOC",
+          "max_grid_feed_in_power": "Max Feed-in Power",
+          "grid_power_tolerance_discharge": "Grid Import Tolerance (Discharge)",
+          "max_grid_import_solar_charge": "Max Grid Import (Solar Charge)",
+          "max_charge_power": "Max Charge Power",
+          "min_charge_power": "Min Charge Power",
+          "update_interval": "Update Interval",
+          "deadband": "Deadband",
+          "charge_power_step": "Charge Power Step",
+          "min_dwell_time": "Min Dwell Time"
+        },
+        "data_description": {
+          "feed_in_mode": "Dynamic adjusts feed-in to match consumption. Static uses a fixed value.",
+          "feed_in_static_power": "Fixed feed-in power when using static mode.",
+          "min_battery_soc": "Stop discharging when battery reaches this SOC.",
+          "max_grid_feed_in_power": "Maximum power to feed into the home.",
+          "grid_power_tolerance_discharge": "Acceptable grid import while discharging.",
+          "max_grid_import_solar_charge": "Maximum grid import allowed during solar charging (0 = pure solar).",
+          "max_charge_power": "Maximum battery charging power.",
+          "min_charge_power": "Minimum battery charging power.",
+          "update_interval": "How often the manager evaluates and adjusts (seconds).",
+          "deadband": "Power deviation threshold before adjusting (prevents oscillation).",
+          "charge_power_step": "Step size for charge power adjustments (battery hardware constraint).",
+          "min_dwell_time": "Minimum time to stay in a state before transitioning (seconds)."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status"
+      },
+      "battery_soc": {
+        "name": "Battery SOC"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Operating Mode"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Enabled"
+      }
+    }
+  }
+}

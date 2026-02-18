@@ -1,0 +1,13 @@
+{
+  "domain": "ha_energy_manager",
+  "name": "Energy Manager",
+  "codeowners": ["@faken"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/faken/ha_energy_manager",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "1.0.0",
+  "single_config_entry": true
+}
