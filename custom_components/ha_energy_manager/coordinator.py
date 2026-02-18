@@ -557,7 +557,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             await self._auto_charge(
                 grid_power, solar_power, battery_soc, min_soc,
                 min_power, max_power, deadband, step,
-                max_feed_in, has_solar_surplus, dwell_ok,
+                feed_in_mode, grid_tolerance,
+                has_solar_surplus, dwell_ok,
             )
         elif self._fsm_state == STATE_HOLD:
             await self._auto_hold(
@@ -581,7 +582,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         max_power: float,
         deadband: float,
         step: float,
-        max_feed_in: float,
+        feed_in_mode: str,
+        grid_tolerance: float,
         has_solar_surplus: bool,
         dwell_ok: bool,
     ) -> None:
@@ -626,13 +628,23 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         # State transitions
         if dwell_ok:
-            if battery_soc > min_soc and grid_power > max_feed_in:
-                self._set_fsm_state(
-                    STATE_DISCHARGE,
-                    f"High grid consumption {grid_power:.0f}W > {max_feed_in:.0f}W, "
-                    f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
-                )
-                return
+            if battery_soc > min_soc:
+                if feed_in_mode != FEED_IN_DYNAMIC:
+                    # Static mode: switch to discharge when no surplus
+                    if not has_solar_surplus:
+                        self._set_fsm_state(
+                            STATE_DISCHARGE,
+                            f"Static feed-in: no surplus, SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                        )
+                        return
+                elif grid_power > grid_tolerance:
+                    # Dynamic mode: switch to discharge on high grid import
+                    self._set_fsm_state(
+                        STATE_DISCHARGE,
+                        f"Grid import {grid_power:.0f}W > tolerance {grid_tolerance:.0f}W, "
+                        f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                    )
+                    return
 
             if not has_solar_surplus:
                 self._set_fsm_state(
@@ -649,8 +661,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: HOLD state."""
-        max_feed_in = self._get_option(
-            OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
+        feed_in_mode = self._get_option(OPT_FEED_IN_MODE, DEFAULT_FEED_IN_MODE)
+        grid_tolerance = self._get_option(
+            OPT_GRID_POWER_TOLERANCE_DISCHARGE, DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE
         )
 
         await self._async_set_feed_in_power(0)
@@ -666,12 +679,23 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 )
                 return
 
-            if battery_soc > min_soc and grid_power > max_feed_in:
-                self._set_fsm_state(
-                    STATE_DISCHARGE,
-                    f"High grid consumption {grid_power:.0f}W > {max_feed_in:.0f}W, "
-                    f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
-                )
+            # Discharge conditions depend on feed-in mode:
+            # - Static: discharge whenever SOC is sufficient (always feed fixed power)
+            # - Dynamic: discharge when grid import exceeds tolerance
+            if battery_soc > min_soc:
+                if feed_in_mode != FEED_IN_DYNAMIC:
+                    # Static mode: always discharge when battery has charge
+                    self._set_fsm_state(
+                        STATE_DISCHARGE,
+                        f"Static feed-in: SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                    )
+                elif grid_power > grid_tolerance:
+                    # Dynamic mode: discharge when grid import is significant
+                    self._set_fsm_state(
+                        STATE_DISCHARGE,
+                        f"Grid import {grid_power:.0f}W > tolerance {grid_tolerance:.0f}W, "
+                        f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                    )
 
     async def _auto_discharge(
         self,
