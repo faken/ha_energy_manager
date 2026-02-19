@@ -672,6 +672,13 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             OPT_GRID_POWER_TOLERANCE_DISCHARGE, DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE
         )
 
+        _LOGGER.debug(
+            "auto_hold: grid=%.0f, soc=%.0f, mode=%s, tolerance=%.0f, "
+            "surplus=%s, dwell_ok=%s",
+            grid_power, battery_soc, feed_in_mode, grid_tolerance,
+            has_solar_surplus, dwell_ok,
+        )
+
         await self._async_set_feed_in_power(0)
         await self._async_set_charge_power(0)
 
