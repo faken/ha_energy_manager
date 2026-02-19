@@ -498,31 +498,30 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         current = self._current_charge_power or min_power
         if grid_power > deadband:
             new_power = current - step
-            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {clamped:.0f}W"
+                f"reducing charge {current:.0f}W → {max(new_power, 0):.0f}W"
             )
         elif grid_power < -deadband:
             new_power = current + step
-            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {clamped:.0f}W"
+                f"increasing charge {current:.0f}W → {min(new_power, max_power):.0f}W"
             )
         else:
             new_power = current
             reason = ""  # No change, no log
 
-        # Allow ramping down to 0
         new_power = max(min(new_power, max_power), 0)
 
-        # If below min_power but > 0, snap to 0 (avoid invalid range)
+        # While solar is available, don't drop below min_power — stay at
+        # minimum charge and accept the small grid import. Only stop when
+        # solar is genuinely insufficient (handled by the solar_power check above).
         if 0 < new_power < min_power:
-            new_power = 0
+            new_power = min_power
             reason = (
-                f"Charge power {current:.0f}W below minimum {min_power:.0f}W, "
-                f"stopping solar charge"
+                f"Holding at min charge {min_power:.0f}W "
+                f"(solar available, grid import {grid_power:.0f}W)"
             )
 
         await self._async_set_charge_power(new_power, reason=reason)
@@ -607,32 +606,39 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         current = self._current_charge_power or min_power
         if grid_power > deadband:
             new_power = current - step
-            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {clamped:.0f}W"
+                f"reducing charge {current:.0f}W → {max(new_power, 0):.0f}W"
             )
         elif grid_power < -deadband:
             new_power = current + step
-            clamped = max(min(new_power, max_power), 0)
             reason = (
                 f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {clamped:.0f}W"
+                f"increasing charge {current:.0f}W → {min(new_power, max_power):.0f}W"
             )
         else:
             new_power = current
             reason = ""
 
-        # Allow ramping down to 0 — _async_set_charge_power(0) turns off switch
         new_power = max(min(new_power, max_power), 0)
 
-        # If ramped down to below min_power but > 0, snap to 0 (avoid invalid range)
-        if 0 < new_power < min_power:
-            new_power = 0
+        # While solar surplus exists, don't drop below min_power — stay at
+        # minimum charge and accept the small grid import. Only stop charging
+        # (ramp to 0) when solar surplus is truly gone.
+        if has_solar_surplus and 0 < new_power < min_power:
+            new_power = min_power
             reason = (
-                f"Charge power {current:.0f}W below minimum {min_power:.0f}W, "
-                f"stopping charge"
+                f"Holding at min charge {min_power:.0f}W "
+                f"(solar surplus present, grid import {grid_power:.0f}W)"
             )
+        elif not has_solar_surplus and new_power <= min_power:
+            # No surplus: allow ramping to 0
+            new_power = 0
+            if current > 0:
+                reason = (
+                    f"No solar surplus, stopping charge "
+                    f"(grid {grid_power:.0f}W)"
+                )
 
         await self._async_set_charge_power(new_power, reason=reason)
 
