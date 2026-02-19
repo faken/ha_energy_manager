@@ -403,13 +403,36 @@ class TestAutomaticMode:
         assert coordinator._fsm_state == STATE_HOLD
 
     @pytest.mark.asyncio
-    async def test_charge_to_discharge_dynamic_mode(self, coordinator, mock_hass):
-        """CHARGE → DISCHARGE in dynamic mode when grid > tolerance and SOC > min."""
+    async def test_charge_stays_charge_with_solar_surplus_and_grid_import(self, coordinator, mock_hass):
+        """CHARGE stays CHARGE when solar surplus exists even if grid import is high.
+
+        This prevents oscillation: when charging from solar, the charge power
+        itself causes grid import. The correct response is to reduce charge
+        power (gradual ramping), NOT to switch to DISCHARGE.
+        """
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_CHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        # Simulate active charging at 300W which causes the 200W grid import
+        coordinator._current_charge_power = 300
+        coordinator._last_charge_power = 300
+
+        # Solar surplus (700W solar, grid_import=200W from charging at 300W)
+        # grid_natural = 200 - 300 + 0 = -100 → solar surplus detected
+        await coordinator._run_automatic(
+            grid_power=200, solar_power=700, battery_soc=50
+        )
+        # Should stay in CHARGE, not switch to DISCHARGE
+        assert coordinator._fsm_state == STATE_CHARGE
+
+    @pytest.mark.asyncio
+    async def test_charge_to_discharge_no_solar(self, coordinator, mock_hass):
+        """CHARGE → DISCHARGE when no solar surplus and SOC > min."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_CHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
 
-        # High grid import, no solar, sufficient SOC → DISCHARGE (dynamic mode)
+        # No solar, sufficient SOC → DISCHARGE
         await coordinator._run_automatic(
             grid_power=500, solar_power=0, battery_soc=50
         )
