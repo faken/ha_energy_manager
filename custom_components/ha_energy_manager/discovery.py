@@ -10,9 +10,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
-    CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
@@ -51,7 +49,7 @@ async def async_discover_control_entities(
     """Discover EcoFlow control entities.
 
     Strategy:
-    1. Find devices from configured sensor/switch entities
+    1. Find devices from configured sensor entities
     2. Search sibling entities on those devices first
     3. If not all found, fall back to searching ALL entities in the system
 
@@ -66,8 +64,6 @@ async def async_discover_control_entities(
             CONF_GRID_POWER_SENSOR,
             CONF_SOLAR_POWER_SENSOR,
             CONF_BATTERY_SOC_SENSOR,
-            CONF_CHARGE_SWITCH,
-            CONF_DISCHARGE_SWITCH,
         )
         if key in config_data
     ]
