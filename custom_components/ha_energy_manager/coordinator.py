@@ -549,14 +549,20 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
 
         # Solar surplus detection: check if there's genuine solar surplus
-        # independent of our own feed-in effect on the grid reading.
-        # Correct the grid reading by removing our feed-in effect:
-        # grid_without_feedin = grid_power + current_feed_in
-        # This gives us what the grid would read if we weren't feeding in.
-        grid_without_feedin = grid_power + self._current_feed_in_power
+        # independent of our own effects on the grid reading.
+        # Our charging increases grid import, our feed-in decreases it.
+        # Remove both effects to see the "natural" grid state:
+        #   grid_natural = grid_power - charge_effect + feedin_effect
+        # Since charging adds to import: subtract charge_power
+        # Since feed-in reduces import: add feed_in_power
+        grid_natural = (
+            grid_power
+            - self._current_charge_power
+            + self._current_feed_in_power
+        )
         has_solar_surplus = (
-            grid_without_feedin < 0
-            or (solar_power > min_power and grid_without_feedin < deadband)
+            grid_natural < 0
+            or (solar_power > min_power and grid_natural < deadband)
         )
         dwell_ok = self._dwell_time_exceeded()
 
@@ -632,29 +638,19 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         # State transitions
         if dwell_ok:
-            if battery_soc > min_soc:
-                if feed_in_mode != FEED_IN_DYNAMIC:
-                    # Static mode: switch to discharge when no surplus
-                    if not has_solar_surplus:
-                        self._set_fsm_state(
-                            STATE_DISCHARGE,
-                            f"Static feed-in: no surplus, SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
-                        )
-                        return
-                elif grid_power > grid_tolerance:
-                    # Dynamic mode: switch to discharge on high grid import
+            if not has_solar_surplus:
+                # No solar surplus — either discharge or hold
+                if battery_soc > min_soc:
                     self._set_fsm_state(
                         STATE_DISCHARGE,
-                        f"Grid import {grid_power:.0f}W > tolerance {grid_tolerance:.0f}W, "
-                        f"SOC {battery_soc:.0f}% > min {min_soc:.0f}%",
+                        f"No solar surplus, SOC {battery_soc:.0f}% > min {min_soc:.0f}%, "
+                        f"switching to discharge",
                     )
-                    return
-
-            if not has_solar_surplus:
-                self._set_fsm_state(
-                    STATE_HOLD,
-                    f"No solar surplus (grid import {grid_power:.0f}W, solar {solar_power:.0f}W)",
-                )
+                else:
+                    self._set_fsm_state(
+                        STATE_HOLD,
+                        f"No solar surplus and SOC {battery_soc:.0f}% <= min {min_soc:.0f}%",
+                    )
 
     async def _auto_hold(
         self,
