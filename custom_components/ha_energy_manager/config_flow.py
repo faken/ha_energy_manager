@@ -22,6 +22,8 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
+    CONF_CHARGE_SWITCH,
+    CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
     DEFAULT_CHARGE_POWER_STEP,
@@ -63,6 +65,12 @@ ENTITY_SCHEMA = vol.Schema(
         ),
         vol.Required(CONF_BATTERY_SOC_SENSOR): EntitySelector(
             EntitySelectorConfig(domain="sensor")
+        ),
+        vol.Required(CONF_CHARGE_SWITCH): EntitySelector(
+            EntitySelectorConfig(domain="switch")
+        ),
+        vol.Required(CONF_DISCHARGE_SWITCH): EntitySelector(
+            EntitySelectorConfig(domain="switch")
         ),
     }
 )

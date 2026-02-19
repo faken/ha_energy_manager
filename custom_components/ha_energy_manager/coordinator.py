@@ -15,7 +15,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
+    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
+    CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
@@ -108,6 +110,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_charge_power: float | None = None
         self._last_feed_in_power: float | None = None
         self._last_ps_mode: str | None = None
+        self._last_charge_switch: bool | None = None
+        self._last_discharge_switch: bool | None = None
 
         # Current applied values
         self._current_charge_power: float = 0.0
@@ -190,6 +194,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_charge_power = None
         self._last_feed_in_power = None
         self._last_ps_mode = None
+        self._last_charge_switch = None
+        self._last_discharge_switch = None
 
         self._log_decision(
             LOG_MODE_CHANGE,
@@ -211,6 +217,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             self._last_charge_power = None
             self._last_feed_in_power = None
             self._last_ps_mode = None
+            self._last_charge_switch = None
+            self._last_discharge_switch = None
 
         if old_value != value:
             self._log_decision(
@@ -261,6 +269,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             self._last_charge_power = None
             self._last_feed_in_power = None
             self._last_ps_mode = None
+            self._last_charge_switch = None
+            self._last_discharge_switch = None
 
             self._log_decision(
                 LOG_STATE_TRANSITION,
@@ -281,17 +291,41 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
         self._last_ps_mode = mode
 
+    async def _async_set_charge_switch(self, on: bool) -> None:
+        """Turn the charge Shelly relay on or off."""
+        if self._last_charge_switch == on:
+            return
+        entity_id = self._entity_ids[CONF_CHARGE_SWITCH]
+        await self.hass.services.async_call(
+            "switch",
+            "turn_on" if on else "turn_off",
+            {"entity_id": entity_id},
+        )
+        self._last_charge_switch = on
+
+    async def _async_set_discharge_switch(self, on: bool) -> None:
+        """Turn the discharge Shelly relay on or off."""
+        if self._last_discharge_switch == on:
+            return
+        entity_id = self._entity_ids[CONF_DISCHARGE_SWITCH]
+        await self.hass.services.async_call(
+            "switch",
+            "turn_on" if on else "turn_off",
+            {"entity_id": entity_id},
+        )
+        self._last_discharge_switch = on
+
     async def _async_set_charge_power(self, value: float, reason: str = "") -> None:
         """Set the max AC charging power (snapped to step).
 
-        When value is <= 0, the charge power is set to minimum and PS mode
-        is switched away from storage to stop charging.
-        When value is > 0, PS mode is set to storage and the power value is applied.
+        When value is <= 0, the charge Shelly relay is turned OFF to physically
+        stop charging (EcoFlow software cannot reliably stop charging).
+        When value is > 0, the charge Shelly relay is turned ON, PS mode is set
+        to storage, and the power value is applied.
         """
         if value <= 0:
-            # Stop charging: switch PS mode to supply (stops AC charging)
-            # Leave charge power number at its current value (EcoFlow ignores
-            # it when not in storage mode).
+            # Stop charging: turn off Shelly relay (physically cuts AC to charger)
+            await self._async_set_charge_switch(False)
             if self._last_charge_power != 0:
                 old_power = self._last_charge_power or 0
                 self._last_charge_power = 0
@@ -307,7 +341,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             return
         old_power = self._last_charge_power or 0
 
-        # Set PS mode to storage and apply charge power
+        # Turn on Shelly relay, set PS mode to storage, apply charge power
+        await self._async_set_charge_switch(True)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         entity_id = self._entity_ids[CONF_MAX_CHARGE_POWER_NUMBER]
         await self.hass.services.async_call(
@@ -324,10 +359,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     async def _async_set_feed_in_power(self, value: float, reason: str = "") -> None:
         """Set the custom load (feed-in) power.
 
-        When value is > 0, PowerStream is set to 'Prioritize power supply'
-        and the custom load power value is sent.
-        When value is <= 0, PS mode is set to storage to stop feeding in,
-        and the custom load power is set to 0.
+        When value is > 0, the discharge Shelly relay is turned ON,
+        PowerStream is set to 'Prioritize power supply', and the custom
+        load power value is sent.
+        When value is <= 0, the discharge Shelly relay is turned OFF to
+        physically stop feed-in (EcoFlow software cannot reliably stop it).
         """
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
@@ -340,22 +376,18 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         )
 
         if snapped <= 0:
-            # Stop feeding in: set custom load power to 0
+            # Stop feeding in: turn off Shelly relay (physically cuts AC output)
+            await self._async_set_discharge_switch(False)
             if self._last_feed_in_power != 0:
                 old_power = self._last_feed_in_power or 0
-                entity_id = self._entity_ids[CONF_CUSTOM_LOAD_POWER_NUMBER]
-                await self.hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": entity_id, "value": 0},
-                )
                 self._last_feed_in_power = 0
                 self._current_feed_in_power = 0
                 log_reason = reason or f"Feed-in power {old_power}W → 0W (stopped)"
                 self._log_decision(LOG_POWER_ADJUST, log_reason)
             return
 
-        # Feed-in > 0: set PS mode to supply, then set custom load power
+        # Feed-in > 0: turn on Shelly, set PS mode to supply, set custom load power
+        await self._async_set_discharge_switch(True)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
 
         if self._last_feed_in_power == snapped:
@@ -439,8 +471,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         """Execute hold mode logic."""
         await self._async_set_feed_in_power(0)
         await self._async_set_charge_power(0, reason="Hold mode, charge stopped")
-        # Ensure PS mode is set to supply so no unintended charging occurs
-        await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        # Ensure both Shelly relays are off
+        await self._async_set_charge_switch(False)
+        await self._async_set_discharge_switch(False)
         self._fsm_state = STATE_HOLD
 
     async def _run_solar(self, grid_power: float, solar_power: float) -> None:

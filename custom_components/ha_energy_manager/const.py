@@ -9,6 +9,8 @@ CONF_BATTERY_SOC_SENSOR = "battery_soc_sensor"
 CONF_POWER_SUPPLY_MODE_SELECT = "power_supply_mode_select"
 CONF_MAX_CHARGE_POWER_NUMBER = "max_charge_power_number"
 CONF_CUSTOM_LOAD_POWER_NUMBER = "custom_load_power_number"
+CONF_CHARGE_SWITCH = "charge_switch"
+CONF_DISCHARGE_SWITCH = "discharge_switch"
 
 # Options keys - adjustable at runtime via options flow
 OPT_FEED_IN_MODE = "feed_in_mode"

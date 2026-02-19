@@ -9,7 +9,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
+    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
+    CONF_DISCHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
     DOMAIN,
@@ -51,6 +53,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 f"Could not auto-discover EcoFlow control entities: {', '.join(missing)}. "
                 f"Make sure the EcoFlow integration is loaded and entities are available."
             )
+
+    # Verify switch entities are configured
+    missing_switches = []
+    if CONF_CHARGE_SWITCH not in entity_ids:
+        missing_switches.append("Charge Switch (Shelly relay for charger)")
+    if CONF_DISCHARGE_SWITCH not in entity_ids:
+        missing_switches.append("Discharge Switch (Shelly relay for PowerStream)")
+    if missing_switches:
+        raise ConfigEntryNotReady(
+            f"Missing switch entities: {', '.join(missing_switches)}. "
+            f"Please reconfigure the integration and select the Shelly switch entities."
+        )
 
         _LOGGER.info(
             "Auto-discovered control entities: charge_power=%s, custom_load=%s, ps_mode=%s",
