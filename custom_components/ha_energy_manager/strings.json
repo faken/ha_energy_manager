@@ -3,20 +3,16 @@
     "step": {
       "user": {
         "title": "Configure Energy Manager",
-        "description": "Select the sensors and switches from your EcoFlow system.\n\nThe integration will automatically detect the matching control entities (charge power, feed-in power, PowerStream mode) from the same devices.",
+        "description": "Select the sensors from your EcoFlow system.\n\nThe integration will automatically detect the matching control entities (charge power, feed-in power, PowerStream mode) from the same devices.",
         "data": {
           "grid_power_sensor": "Grid Power",
           "solar_power_sensor": "Solar Power",
-          "battery_soc_sensor": "Battery SOC",
-          "charge_switch": "Charge Switch",
-          "discharge_switch": "Discharge Switch"
+          "battery_soc_sensor": "Battery SOC"
         },
         "data_description": {
           "grid_power_sensor": "Current grid import (+) / export (−) in watts. Usually from your smart meter or energy monitor.",
           "solar_power_sensor": "Current solar production in watts from your PowerStream or inverter.",
-          "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level).",
-          "charge_switch": "Switch that enables AC charging of the battery (e.g. switch.delta_2_max_ac_charging).",
-          "discharge_switch": "Switch that enables discharge / feed-in from the battery (e.g. switch.powerstream_custom_load_enabled)."
+          "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level)."
         }
       }
     }

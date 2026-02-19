@@ -8,9 +8,7 @@ import pytest
 
 from custom_components.ha_energy_manager.const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
-    CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
@@ -84,8 +82,6 @@ class TestAutoDiscovery:
             CONF_GRID_POWER_SENSOR: "sensor.grid_power",
             CONF_SOLAR_POWER_SENSOR: "sensor.solar_power",
             CONF_BATTERY_SOC_SENSOR: "sensor.delta_2_battery_level",
-            CONF_CHARGE_SWITCH: "switch.delta_2_ac_charging",
-            CONF_DISCHARGE_SWITCH: "switch.powerstream_custom_load_enabled",
         }
 
         # Registry entries
@@ -98,12 +94,6 @@ class TestAutoDiscovery:
             ),
             "sensor.delta_2_battery_level": _make_registry_entry(
                 "sensor.delta_2_battery_level", "device_delta", "sensor"
-            ),
-            "switch.delta_2_ac_charging": _make_registry_entry(
-                "switch.delta_2_ac_charging", "device_delta", "switch"
-            ),
-            "switch.powerstream_custom_load_enabled": _make_registry_entry(
-                "switch.powerstream_custom_load_enabled", "device_ps", "switch"
             ),
             # Control entities to discover
             "number.delta_2_max_ac_charging_power": _make_registry_entry(
@@ -148,8 +138,6 @@ class TestAutoDiscovery:
             CONF_GRID_POWER_SENSOR: "sensor.grid_power",
             CONF_SOLAR_POWER_SENSOR: "sensor.solar_power",
             CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
-            CONF_CHARGE_SWITCH: "switch.charge",
-            CONF_DISCHARGE_SWITCH: "switch.discharge",
         }
 
         entries = {
@@ -161,12 +149,6 @@ class TestAutoDiscovery:
             ),
             "sensor.battery_soc": _make_registry_entry(
                 "sensor.battery_soc", "device_1", "sensor"
-            ),
-            "switch.charge": _make_registry_entry(
-                "switch.charge", "device_1", "switch"
-            ),
-            "switch.discharge": _make_registry_entry(
-                "switch.discharge", "device_1", "switch"
             ),
             # Only charge power available, no custom_load or ps_mode
             "number.delta_2_max_ac_charging_power": _make_registry_entry(
@@ -198,8 +180,6 @@ class TestAutoDiscovery:
             CONF_GRID_POWER_SENSOR: "sensor.grid_power",
             CONF_SOLAR_POWER_SENSOR: "sensor.solar_power",
             CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
-            CONF_CHARGE_SWITCH: "switch.charge",
-            CONF_DISCHARGE_SWITCH: "switch.discharge",
         }
 
         registry = MagicMock()

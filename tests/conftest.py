@@ -10,9 +10,7 @@ import pytest
 
 from custom_components.ha_energy_manager.const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
-    CONF_DISCHARGE_SWITCH,
     CONF_GRID_POWER_SENSOR,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
@@ -40,8 +38,6 @@ MOCK_ENTITY_IDS = {
     CONF_GRID_POWER_SENSOR: "sensor.grid_power",
     CONF_SOLAR_POWER_SENSOR: "sensor.solar_power",
     CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
-    CONF_CHARGE_SWITCH: "switch.charge",
-    CONF_DISCHARGE_SWITCH: "switch.discharge",
     CONF_POWER_SUPPLY_MODE_SELECT: "select.ps_mode",
     CONF_MAX_CHARGE_POWER_NUMBER: "number.charge_power",
     CONF_CUSTOM_LOAD_POWER_NUMBER: "number.custom_load",
