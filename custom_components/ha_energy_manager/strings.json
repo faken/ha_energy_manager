@@ -7,12 +7,16 @@
         "data": {
           "grid_power_sensor": "Grid Power",
           "solar_power_sensor": "Solar Power",
-          "battery_soc_sensor": "Battery SOC"
+          "battery_soc_sensor": "Battery SOC",
+          "charge_switch": "Charge Switch",
+          "discharge_switch": "Discharge Switch"
         },
         "data_description": {
           "grid_power_sensor": "Current grid import (+) / export (−) in watts. Usually from your smart meter or energy monitor.",
           "solar_power_sensor": "Current solar production in watts from your PowerStream or inverter.",
-          "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level)."
+          "battery_soc_sensor": "Battery state of charge in percent (e.g. sensor.delta_2_max_battery_level).",
+          "charge_switch": "Shelly relay that controls AC power to the battery charger. Turned on/off to start/stop charging.",
+          "discharge_switch": "Shelly relay that controls AC output from the PowerStream. Turned on/off to start/stop feed-in."
         }
       }
     }

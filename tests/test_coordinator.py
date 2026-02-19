@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.ha_energy_manager.const import (
+    CONF_CHARGE_SWITCH,
     CONF_CUSTOM_LOAD_POWER_NUMBER,
+    CONF_DISCHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
     DEFAULT_LOG_BUFFER_SIZE,
@@ -53,8 +55,11 @@ class TestSetChargePower:
 
     @pytest.mark.asyncio
     async def test_set_charge_power_positive(self, coordinator, mock_hass):
-        """Setting positive charge power sets PS mode to storage and sends number.set_value."""
+        """Setting positive charge power turns on switch, sets PS mode to storage, and sends number.set_value."""
         await coordinator._async_set_charge_power(400, reason="test")
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_on", {"entity_id": "switch.charge"},
+        )
         mock_hass.services.async_call.assert_any_call(
             "select",
             "select_option",
@@ -68,20 +73,21 @@ class TestSetChargePower:
 
     @pytest.mark.asyncio
     async def test_set_charge_power_zero_stops_charging(self, coordinator, mock_hass):
-        """Setting charge power to 0 stops charging without sending number.set_value(0)."""
+        """Setting charge power to 0 turns off charge switch."""
         await coordinator._async_set_charge_power(0, reason="test")
-        # Verify no number.set_value call was made
-        assert not any(
-            call[0] == ("number", "set_value")
-            for call in mock_hass.services.async_call.call_args_list
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_off", {"entity_id": "switch.charge"},
         )
         assert coordinator._last_charge_power == 0
         assert coordinator._current_charge_power == 0
 
     @pytest.mark.asyncio
     async def test_set_charge_power_negative_stops_charging(self, coordinator, mock_hass):
-        """Negative value also stops charging."""
+        """Negative value also turns off charge switch."""
         await coordinator._async_set_charge_power(-100, reason="test")
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_off", {"entity_id": "switch.charge"},
+        )
         assert coordinator._last_charge_power == 0
         assert coordinator._current_charge_power == 0
 
@@ -136,8 +142,11 @@ class TestSetFeedInPower:
 
     @pytest.mark.asyncio
     async def test_set_feed_in_positive_sets_supply_mode(self, coordinator, mock_hass):
-        """Positive feed-in sets PS mode to supply and sends custom load power."""
+        """Positive feed-in turns on discharge switch, sets PS mode to supply, and sends custom load power."""
         await coordinator._async_set_feed_in_power(300, reason="test")
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_on", {"entity_id": "switch.discharge"},
+        )
         mock_hass.services.async_call.assert_any_call(
             "select",
             "select_option",
@@ -148,16 +157,15 @@ class TestSetFeedInPower:
         )
 
     @pytest.mark.asyncio
-    async def test_set_feed_in_zero_sets_custom_load_zero(self, coordinator, mock_hass):
-        """Zero feed-in sets custom load power to 0."""
+    async def test_set_feed_in_zero_turns_off_switch(self, coordinator, mock_hass):
+        """Zero feed-in turns off discharge switch."""
         # First set a positive value
         await coordinator._async_set_feed_in_power(300, reason="initial")
         mock_hass.services.async_call.reset_mock()
 
         await coordinator._async_set_feed_in_power(0, reason="stop")
-        # Verify number.set_value(0) call was made to stop custom load
         mock_hass.services.async_call.assert_any_call(
-            "number", "set_value", {"entity_id": "number.custom_load", "value": 0}
+            "switch", "turn_off", {"entity_id": "switch.discharge"},
         )
         assert coordinator._last_feed_in_power == 0
 
@@ -194,6 +202,65 @@ class TestPowerSupplyMode:
         mock_hass.services.async_call.assert_not_called()
 
 
+# ── Switch setters ──────────────────────────────────────────────────
+
+
+class TestSwitchSetters:
+    """Test Shelly switch setters."""
+
+    @pytest.mark.asyncio
+    async def test_charge_switch_on(self, coordinator, mock_hass):
+        """Charge switch turns on."""
+        await coordinator._async_set_charge_switch(True)
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_on", {"entity_id": "switch.charge"},
+        )
+        assert coordinator._last_charge_switch is True
+
+    @pytest.mark.asyncio
+    async def test_charge_switch_off(self, coordinator, mock_hass):
+        """Charge switch turns off."""
+        await coordinator._async_set_charge_switch(False)
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_off", {"entity_id": "switch.charge"},
+        )
+        assert coordinator._last_charge_switch is False
+
+    @pytest.mark.asyncio
+    async def test_charge_switch_skips_redundant(self, coordinator, mock_hass):
+        """Charge switch skips redundant call."""
+        await coordinator._async_set_charge_switch(True)
+        mock_hass.services.async_call.reset_mock()
+        await coordinator._async_set_charge_switch(True)
+        mock_hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_discharge_switch_on(self, coordinator, mock_hass):
+        """Discharge switch turns on."""
+        await coordinator._async_set_discharge_switch(True)
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_on", {"entity_id": "switch.discharge"},
+        )
+        assert coordinator._last_discharge_switch is True
+
+    @pytest.mark.asyncio
+    async def test_discharge_switch_off(self, coordinator, mock_hass):
+        """Discharge switch turns off."""
+        await coordinator._async_set_discharge_switch(False)
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_off", {"entity_id": "switch.discharge"},
+        )
+        assert coordinator._last_discharge_switch is False
+
+    @pytest.mark.asyncio
+    async def test_discharge_switch_skips_redundant(self, coordinator, mock_hass):
+        """Discharge switch skips redundant call."""
+        await coordinator._async_set_discharge_switch(True)
+        mock_hass.services.async_call.reset_mock()
+        await coordinator._async_set_discharge_switch(True)
+        mock_hass.services.async_call.assert_not_called()
+
+
 # ── FSM state transitions ───────────────────────────────────────────
 
 
@@ -205,12 +272,16 @@ class TestFSMStateTransitions:
         coordinator._last_charge_power = 400
         coordinator._last_feed_in_power = 200
         coordinator._last_ps_mode = PS_MODE_PRIORITIZE_SUPPLY
+        coordinator._last_charge_switch = True
+        coordinator._last_discharge_switch = True
 
         coordinator._set_fsm_state(STATE_DISCHARGE, "test")
 
         assert coordinator._last_charge_power is None
         assert coordinator._last_feed_in_power is None
         assert coordinator._last_ps_mode is None
+        assert coordinator._last_charge_switch is None
+        assert coordinator._last_discharge_switch is None
 
     def test_set_fsm_state_no_change(self, coordinator):
         """Same state transition is a no-op."""
@@ -235,10 +306,13 @@ class TestForcedChargeMode:
 
     @pytest.mark.asyncio
     async def test_forced_charge_sets_max_power(self, coordinator, mock_hass):
-        """Forced charge sets charge power to max and PS mode to storage."""
+        """Forced charge turns on charge switch, sets PS mode to storage, and sets max power."""
         coordinator._active_mode = MODE_FORCED_CHARGE
         await coordinator._run_forced_charge()
 
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_on", {"entity_id": "switch.charge"},
+        )
         mock_hass.services.async_call.assert_any_call(
             "select",
             "select_option",
@@ -255,14 +329,15 @@ class TestHoldMode:
 
     @pytest.mark.asyncio
     async def test_hold_disables_everything(self, coordinator, mock_hass):
-        """Hold mode stops charging and feeding in, sets PS mode to supply."""
+        """Hold mode stops charging and feeding in, turns off both switches."""
         await coordinator._run_hold()
 
-        # PS mode set to supply to prevent unintended charging
+        # Both Shelly switches should be turned off
         mock_hass.services.async_call.assert_any_call(
-            "select",
-            "select_option",
-            {"entity_id": "select.ps_mode", "option": PS_MODE_PRIORITIZE_SUPPLY},
+            "switch", "turn_off", {"entity_id": "switch.charge"},
+        )
+        mock_hass.services.async_call.assert_any_call(
+            "switch", "turn_off", {"entity_id": "switch.discharge"},
         )
         assert coordinator._fsm_state == STATE_HOLD
         assert coordinator._current_charge_power == 0
@@ -595,8 +670,12 @@ class TestEnabled:
         """Disabling resets all last-sent values."""
         coordinator._last_charge_power = 400
         coordinator._last_ps_mode = PS_MODE_PRIORITIZE_SUPPLY
+        coordinator._last_charge_switch = True
+        coordinator._last_discharge_switch = True
 
         coordinator.is_enabled = False
 
         assert coordinator._last_charge_power is None
         assert coordinator._last_ps_mode is None
+        assert coordinator._last_charge_switch is None
+        assert coordinator._last_discharge_switch is None
