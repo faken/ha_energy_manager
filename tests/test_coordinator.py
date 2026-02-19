@@ -390,6 +390,29 @@ class TestAutomaticMode:
         assert coordinator._fsm_state == STATE_HOLD
 
     @pytest.mark.asyncio
+    async def test_hold_respects_custom_grid_tolerance(self, coordinator, mock_config_entry, mock_hass):
+        """HOLD stays HOLD when grid import is below a custom tolerance (e.g. 150W)."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_HOLD
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+
+        # Set custom tolerance to 150W
+        mock_config_entry.options["grid_power_tolerance_discharge"] = 150
+
+        # grid=100 < tolerance 150 → should NOT discharge
+        await coordinator._run_automatic(
+            grid_power=100, solar_power=0, battery_soc=50
+        )
+        assert coordinator._fsm_state == STATE_HOLD
+
+        # grid=200 > tolerance 150 → SHOULD discharge
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        await coordinator._run_automatic(
+            grid_power=200, solar_power=0, battery_soc=50
+        )
+        assert coordinator._fsm_state == STATE_DISCHARGE
+
+    @pytest.mark.asyncio
     async def test_charge_to_hold_no_surplus_low_soc(self, coordinator, mock_hass):
         """CHARGE → HOLD when no solar surplus and SOC <= min (can't discharge)."""
         coordinator._active_mode = MODE_AUTOMATIC
