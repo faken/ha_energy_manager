@@ -129,18 +129,44 @@ class EnergyManagerNumber(RestoreNumber):
         self._attr_native_value = entry.options.get(
             description.option_key, description.default
         )
+        self._updating_options = False
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the value and push to coordinator options."""
         self._attr_native_value = value
-        # Update the config entry options so the coordinator picks up the change
-        new_options = {**self._entry.options, self._description.option_key: value}
-        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        # Guard: prevent re-entrant updates from the update listener
+        self._updating_options = True
+        try:
+            new_options = {**self._entry.options, self._description.option_key: value}
+            self.hass.config_entries.async_update_entry(
+                self._entry, options=new_options
+            )
+        finally:
+            self._updating_options = False
         self.async_write_ha_state()
+
+    async def _async_on_options_update(
+        self, hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        """Sync displayed value when config entry options change externally."""
+        if self._updating_options:
+            return
+        new_value = entry.options.get(
+            self._description.option_key, self._description.default
+        )
+        if new_value != self._attr_native_value:
+            self._attr_native_value = new_value
+            self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
         """Restore last value on startup."""
         await super().async_added_to_hass()
+
+        # Listen for external option changes (e.g. Options Flow saves)
+        self.async_on_remove(
+            self._entry.add_update_listener(self._async_on_options_update)
+        )
+
         last_data = await self.async_get_last_number_data()
         if last_data and last_data.native_value is not None:
             self._attr_native_value = last_data.native_value
