@@ -24,6 +24,7 @@ OPT_MIN_CHARGE_POWER = "min_charge_power"
 OPT_UPDATE_INTERVAL = "update_interval"
 OPT_DEADBAND = "deadband"
 OPT_CHARGE_POWER_STEP = "charge_power_step"
+OPT_FEED_IN_POWER_STEP = "feed_in_power_step"
 OPT_MIN_DWELL_TIME = "min_dwell_time"
 
 # Default values for options

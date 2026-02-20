@@ -37,6 +37,7 @@
           "update_interval": "Update Interval",
           "deadband": "Deadband",
           "charge_power_step": "Charge Power Step",
+          "feed_in_power_step": "Feed-in Power Step",
           "min_dwell_time": "Min Dwell Time"
         },
         "data_description": {
@@ -51,6 +52,7 @@
           "update_interval": "How often the manager evaluates and adjusts (seconds).",
           "deadband": "Power deviation threshold before adjusting (prevents oscillation).",
           "charge_power_step": "Step size for charge power adjustments per cycle (hardware constraint).",
+          "feed_in_power_step": "Step size for feed-in power adjustments per cycle.",
           "min_dwell_time": "Minimum time to stay in a state before transitioning (seconds)."
         }
       }
