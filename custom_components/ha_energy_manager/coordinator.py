@@ -760,36 +760,39 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             max_feed_in, current_feed_in,
         )
 
-        # Proportional feed-in adjustment: scale with grid error, step is minimum.
-        # Damped to prevent overshoot from sensor delay.
+        # Asymmetric feed-in adjustment:
+        # - Import side: use grid_tolerance (e.g. 150W) — only increase feed-in
+        #   when grid import exceeds the configured tolerance.
+        # - Export side: use 0W threshold — any grid export means we're feeding
+        #   in too much and wasting battery. Reduce immediately.
         if feed_in_mode == FEED_IN_DYNAMIC:
-            # For feed-in the relationship is inverted vs charge:
-            # grid import → increase feed-in, grid export → decrease feed-in.
-            # The helper returns negative for import (wants to reduce charge),
-            # so we negate to get the feed-in direction.
-            adj = self._calc_proportional_adjustment(
-                grid_power, grid_tolerance, feed_in_step
-            )
-            feed_in_adj = -adj  # invert: import → increase feed-in
-            if feed_in_adj > 0:
+            if grid_power > grid_tolerance:
+                # Grid import exceeds tolerance → increase feed-in (proportional)
+                error = grid_power - grid_tolerance
+                raw = max(feed_in_step, error * DEFAULT_PROPORTIONAL_DAMPING)
+                feed_in_adj = self._snap_to_step(raw, feed_in_step)
                 new_feed_in = min(current_feed_in + feed_in_adj, max_feed_in)
                 reason = (
                     f"Dynamic feed-in: grid import {grid_power:.0f}W > tolerance "
                     f"{grid_tolerance:.0f}W, increasing {current_feed_in:.0f}W "
                     f"→ {new_feed_in:.0f}W"
                 )
-            elif feed_in_adj < 0:
-                new_feed_in = max(current_feed_in + feed_in_adj, 0)
+            elif grid_power < 0:
+                # Any grid export → feeding in too much → reduce (proportional)
+                error = abs(grid_power)
+                raw = max(feed_in_step, error * DEFAULT_PROPORTIONAL_DAMPING)
+                feed_in_adj = self._snap_to_step(raw, feed_in_step)
+                new_feed_in = max(current_feed_in - feed_in_adj, 0)
                 reason = (
-                    f"Dynamic feed-in: grid export {abs(grid_power):.0f}W > tolerance "
-                    f"{grid_tolerance:.0f}W, decreasing {current_feed_in:.0f}W "
-                    f"→ {new_feed_in:.0f}W"
+                    f"Dynamic feed-in: grid export {abs(grid_power):.0f}W, "
+                    f"decreasing {current_feed_in:.0f}W → {new_feed_in:.0f}W"
                 )
             else:
+                # 0 <= grid <= tolerance → acceptable, hold steady
                 new_feed_in = current_feed_in
                 reason = (
                     f"Dynamic feed-in: grid {grid_power:.0f}W within tolerance "
-                    f"±{grid_tolerance:.0f}W, holding at {current_feed_in:.0f}W"
+                    f"0–{grid_tolerance:.0f}W, holding at {current_feed_in:.0f}W"
                 )
         else:
             new_feed_in = min(feed_in_static, max_feed_in)
