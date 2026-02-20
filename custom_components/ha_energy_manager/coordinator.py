@@ -310,10 +310,15 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
     # ── Entity setters ───────────────────────────────────────────────────
 
     async def _async_set_power_supply_mode(self, mode: str) -> None:
-        """Set the PowerStream power supply mode."""
-        if self._last_ps_mode == mode:
-            return
+        """Set the PowerStream power supply mode.
+
+        Checks both the internally tracked value and the actual entity state
+        to detect external changes (e.g. EcoFlow app or other automations).
+        """
         entity_id = self._entity_ids[CONF_POWER_SUPPLY_MODE_SELECT]
+        current_state = self._get_entity_state_str(entity_id)
+        if self._last_ps_mode == mode and current_state == mode:
+            return
         await self.hass.services.async_call(
             "select",
             "select_option",
