@@ -241,11 +241,28 @@ class TestPowerSupplyMode:
 
     @pytest.mark.asyncio
     async def test_ps_mode_skips_redundant(self, coordinator, mock_hass):
-        """PS mode setter skips if already set."""
+        """PS mode setter skips if both tracked and actual state match."""
         await coordinator._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        # Simulate that HA entity now reflects the new mode
+        mock_hass._sensor_states["select.ps_mode"] = make_state(PS_MODE_PRIORITIZE_SUPPLY)
         mock_hass.services.async_call.reset_mock()
         await coordinator._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
         mock_hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ps_mode_reapplied_if_externally_changed(self, coordinator, mock_hass):
+        """PS mode is re-sent if entity state was changed externally (e.g. EcoFlow app)."""
+        await coordinator._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        # Simulate external change: EcoFlow switched back to storage
+        mock_hass._sensor_states["select.ps_mode"] = make_state(PS_MODE_PRIORITIZE_STORAGE)
+        mock_hass.services.async_call.reset_mock()
+        # Even though _last_ps_mode is SUPPLY, entity state differs → re-send
+        await coordinator._async_set_power_supply_mode(PS_MODE_PRIORITIZE_SUPPLY)
+        mock_hass.services.async_call.assert_any_call(
+            "select",
+            "select_option",
+            {"entity_id": "select.ps_mode", "option": PS_MODE_PRIORITIZE_SUPPLY},
+        )
 
 
 # ── Switch setters ──────────────────────────────────────────────────

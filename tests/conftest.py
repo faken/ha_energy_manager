@@ -78,11 +78,12 @@ def mock_hass():
     hass.services.async_call = AsyncMock()
     hass.async_create_task = MagicMock()
 
-    # Default sensor states
+    # Default sensor and entity states
     sensor_states = {
         "sensor.grid_power": make_state(100),
         "sensor.solar_power": make_state(500),
         "sensor.battery_soc": make_state(50),
+        "select.ps_mode": make_state("unknown"),
     }
     hass.states.get = MagicMock(side_effect=lambda eid: sensor_states.get(eid))
 
