@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
+    DEFAULT_PROPORTIONAL_DAMPING,
     DEFAULT_LOG_BUFFER_SIZE,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_GRID_FEED_IN_POWER,
@@ -237,6 +238,34 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         if step is None:
             step = self._get_option(OPT_CHARGE_POWER_STEP, DEFAULT_CHARGE_POWER_STEP)
         return int(round(value / step) * step)
+
+    def _calc_proportional_adjustment(
+        self,
+        grid_power: float,
+        deadband: float,
+        step: float,
+    ) -> int:
+        """Calculate a signed power adjustment proportional to the grid error.
+
+        When grid_power is outside the deadband, the adjustment scales with
+        the error magnitude (damped by DEFAULT_PROPORTIONAL_DAMPING to prevent
+        overshoot from sensor delay).  The configured step acts as the minimum
+        adjustment and snapping granularity.
+
+        Returns a signed integer:
+          - negative → reduce charge power (or increase feed-in)
+          - positive → increase charge power (or reduce feed-in)
+          - zero     → grid_power is within the deadband
+        """
+        if grid_power > deadband:
+            error = grid_power - deadband
+            raw = max(step, error * DEFAULT_PROPORTIONAL_DAMPING)
+            return -self._snap_to_step(raw, step)
+        if grid_power < -deadband:
+            error = abs(grid_power) - deadband
+            raw = max(step, error * DEFAULT_PROPORTIONAL_DAMPING)
+            return self._snap_to_step(raw, step)
+        return 0
 
     def _get_entity_state_float(self, entity_id: str, default: float = 0.0) -> float:
         """Get the float state of an entity."""
@@ -496,19 +525,17 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
 
         await self._async_set_feed_in_power(0)
 
-        # Gradual adjustment: one step per cycle
+        # Proportional adjustment: scale with grid error, step is minimum
         current = self._current_charge_power or min_power
-        if grid_power > deadband:
-            new_power = current - step
+        adj = self._calc_proportional_adjustment(grid_power, deadband, step)
+        if adj != 0:
+            new_power = current + adj
+            direction = "reducing" if adj < 0 else "increasing"
             reason = (
-                f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {max(new_power, 0):.0f}W"
-            )
-        elif grid_power < -deadband:
-            new_power = current + step
-            reason = (
-                f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {min(new_power, max_power):.0f}W"
+                f"Grid {'import' if grid_power > 0 else 'export'} "
+                f"{abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
+                f"{direction} charge {current:.0f}W → "
+                f"{max(min(current + adj, max_power), 0):.0f}W"
             )
         else:
             new_power = current
@@ -604,19 +631,17 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         """Automatic mode: CHARGE state."""
         await self._async_set_feed_in_power(0)
 
-        # Gradual charge power adjustment
+        # Proportional charge power adjustment
         current = self._current_charge_power or min_power
-        if grid_power > deadband:
-            new_power = current - step
+        adj = self._calc_proportional_adjustment(grid_power, deadband, step)
+        if adj != 0:
+            new_power = current + adj
+            direction = "reducing" if adj < 0 else "increasing"
             reason = (
-                f"Grid import {grid_power:.0f}W > deadband {deadband:.0f}W, "
-                f"reducing charge {current:.0f}W → {max(new_power, 0):.0f}W"
-            )
-        elif grid_power < -deadband:
-            new_power = current + step
-            reason = (
-                f"Grid export {abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
-                f"increasing charge {current:.0f}W → {min(new_power, max_power):.0f}W"
+                f"Grid {'import' if grid_power > 0 else 'export'} "
+                f"{abs(grid_power):.0f}W > deadband {deadband:.0f}W, "
+                f"{direction} charge {current:.0f}W → "
+                f"{max(min(current + adj, max_power), 0):.0f}W"
             )
         else:
             new_power = current
@@ -735,31 +760,32 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             max_feed_in, current_feed_in,
         )
 
-        # Calculate feed-in power with GRADUAL adjustment (one step per cycle)
-        # This prevents oscillation caused by the grid sensor reporting delayed values.
+        # Proportional feed-in adjustment: scale with grid error, step is minimum.
+        # Damped to prevent overshoot from sensor delay.
         if feed_in_mode == FEED_IN_DYNAMIC:
-            # Use grid_power directly to decide direction.
-            # If grid_power > tolerance: household is importing → increase feed-in
-            # If grid_power < 0: we're exporting → decrease feed-in
-            # If 0 <= grid_power <= tolerance: close enough → hold steady
-            if grid_power > grid_tolerance:
-                # Grid import too high → ramp up feed-in by one step
-                new_feed_in = min(current_feed_in + feed_in_step, max_feed_in)
+            # For feed-in the relationship is inverted vs charge:
+            # grid import → increase feed-in, grid export → decrease feed-in.
+            # The helper returns negative for import (wants to reduce charge),
+            # so we negate to get the feed-in direction.
+            adj = self._calc_proportional_adjustment(
+                grid_power, grid_tolerance, feed_in_step
+            )
+            feed_in_adj = -adj  # invert: import → increase feed-in
+            if feed_in_adj > 0:
+                new_feed_in = min(current_feed_in + feed_in_adj, max_feed_in)
                 reason = (
                     f"Dynamic feed-in: grid import {grid_power:.0f}W > tolerance "
                     f"{grid_tolerance:.0f}W, increasing {current_feed_in:.0f}W "
                     f"→ {new_feed_in:.0f}W"
                 )
-            elif grid_power < -grid_tolerance:
-                # Grid export → we're feeding in too much → ramp down
-                new_feed_in = max(current_feed_in - feed_in_step, 0)
+            elif feed_in_adj < 0:
+                new_feed_in = max(current_feed_in + feed_in_adj, 0)
                 reason = (
                     f"Dynamic feed-in: grid export {abs(grid_power):.0f}W > tolerance "
                     f"{grid_tolerance:.0f}W, decreasing {current_feed_in:.0f}W "
                     f"→ {new_feed_in:.0f}W"
                 )
             else:
-                # Within tolerance band → hold current value
                 new_feed_in = current_feed_in
                 reason = (
                     f"Dynamic feed-in: grid {grid_power:.0f}W within tolerance "
