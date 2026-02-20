@@ -45,6 +45,7 @@ from .const import (
     OPT_CHARGE_POWER_STEP,
     OPT_DEADBAND,
     OPT_FEED_IN_MODE,
+    OPT_FEED_IN_POWER_STEP,
     OPT_FEED_IN_STATIC_POWER,
     OPT_GRID_POWER_TOLERANCE_DISCHARGE,
     OPT_MAX_CHARGE_POWER,
@@ -368,7 +369,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         max_feed_in = self._get_option(
             OPT_MAX_GRID_FEED_IN_POWER, DEFAULT_MAX_GRID_FEED_IN_POWER
         )
-        snapped = self._snap_to_step(max(min(value, max_feed_in), 0), step=50)
+        feed_in_step = self._get_option(OPT_FEED_IN_POWER_STEP, DEFAULT_FEED_IN_POWER_STEP)
+        snapped = self._snap_to_step(max(min(value, max_feed_in), 0), step=feed_in_step)
 
         _LOGGER.debug(
             "set_feed_in_power called: value=%.1f, snapped=%d, last=%s, max=%d",
@@ -723,7 +725,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         dwell_ok: bool,
     ) -> None:
         """Automatic mode: DISCHARGE state."""
-        feed_in_step = DEFAULT_FEED_IN_POWER_STEP
+        feed_in_step = self._get_option(OPT_FEED_IN_POWER_STEP, DEFAULT_FEED_IN_POWER_STEP)
         current_feed_in = self._current_feed_in_power
 
         _LOGGER.debug(
