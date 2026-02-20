@@ -28,6 +28,87 @@ from custom_components.ha_energy_manager.const import (
 from tests.conftest import make_state
 
 
+# ── Battery SOC stale-value protection ────────────────────────────────
+
+
+class TestBatterySOCProtection:
+    """Test that integration restarts reporting 0% / unavailable don't break the FSM."""
+
+    def test_unavailable_uses_last_known_value(self, coordinator, mock_hass):
+        """When sensor is unavailable, return last known good SOC."""
+        coordinator._last_valid_battery_soc = 65.0
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state("unavailable")
+        assert coordinator._read_battery_soc() == 65.0
+
+    def test_unknown_uses_last_known_value(self, coordinator, mock_hass):
+        """When sensor is unknown, return last known good SOC."""
+        coordinator._last_valid_battery_soc = 42.0
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state("unknown")
+        assert coordinator._read_battery_soc() == 42.0
+
+    def test_missing_entity_uses_last_known_value(self, coordinator, mock_hass):
+        """When sensor entity doesn't exist, return last known good SOC."""
+        coordinator._last_valid_battery_soc = 80.0
+        mock_hass._sensor_states.pop("sensor.battery_soc", None)
+        assert coordinator._read_battery_soc() == 80.0
+
+    def test_zero_drop_from_high_soc_is_rejected(self, coordinator, mock_hass):
+        """A sudden drop from >5% to 0% is treated as a sensor glitch."""
+        coordinator._last_valid_battery_soc = 50.0
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(0)
+        assert coordinator._read_battery_soc() == 50.0
+
+    def test_zero_accepted_when_soc_already_low(self, coordinator, mock_hass):
+        """0% is accepted when the previous reading was already near 0%."""
+        coordinator._last_valid_battery_soc = 3.0
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(0)
+        soc = coordinator._read_battery_soc()
+        assert soc == 0.0
+
+    def test_zero_accepted_on_first_boot(self, coordinator, mock_hass):
+        """0% is accepted when there is no previous reading (first boot)."""
+        assert coordinator._last_valid_battery_soc is None
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(0)
+        assert coordinator._read_battery_soc() == 0.0
+
+    def test_unavailable_with_no_previous_returns_zero(self, coordinator, mock_hass):
+        """Unavailable with no previous reading returns 0.0."""
+        assert coordinator._last_valid_battery_soc is None
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state("unavailable")
+        assert coordinator._read_battery_soc() == 0.0
+
+    def test_valid_reading_updates_last_known(self, coordinator, mock_hass):
+        """A valid SOC reading updates the cached value."""
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(72)
+        assert coordinator._read_battery_soc() == 72.0
+        assert coordinator._last_valid_battery_soc == 72.0
+
+    def test_normal_soc_decline_accepted(self, coordinator, mock_hass):
+        """Normal gradual SOC decline (e.g. 50 → 48) is accepted."""
+        coordinator._last_valid_battery_soc = 50.0
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(48)
+        assert coordinator._read_battery_soc() == 48.0
+        assert coordinator._last_valid_battery_soc == 48.0
+
+    @pytest.mark.asyncio
+    async def test_discharge_continues_during_restart(self, coordinator, mock_hass):
+        """Discharge state is maintained when SOC sensor goes unavailable mid-discharge."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._last_valid_battery_soc = 50.0
+        coordinator._current_feed_in_power = 400
+        coordinator._last_feed_in_power = 400
+
+        # Simulate EcoFlow integration restart: sensor becomes unavailable
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state("unavailable")
+
+        data = await coordinator._async_update_data()
+        # Should remain in DISCHARGE, not drop to HOLD
+        assert coordinator._fsm_state == STATE_DISCHARGE
+        assert data.battery_soc == 50.0
+
+
 # ── Snap to step ─────────────────────────────────────────────────────
 
 
