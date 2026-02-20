@@ -14,6 +14,7 @@ from custom_components.ha_energy_manager.const import (
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
     DEFAULT_LOG_BUFFER_SIZE,
+    DEFAULT_PROPORTIONAL_DAMPING,
     MODE_AUTOMATIC,
     MODE_FORCED_CHARGE,
     MODE_HOLD,
@@ -45,6 +46,51 @@ class TestSnapToStep:
         assert coordinator._snap_to_step(24, step=50) == 0
         assert coordinator._snap_to_step(75, step=50) == 100
         assert coordinator._snap_to_step(276, step=50) == 300
+
+
+# ── Proportional adjustment ─────────────────────────────────────────
+
+
+class TestProportionalAdjustment:
+    """Test the _calc_proportional_adjustment helper."""
+
+    def test_within_deadband_returns_zero(self, coordinator):
+        """No adjustment when grid is within deadband."""
+        assert coordinator._calc_proportional_adjustment(30, 50, 100) == 0
+        assert coordinator._calc_proportional_adjustment(-30, 50, 100) == 0
+        assert coordinator._calc_proportional_adjustment(0, 50, 100) == 0
+
+    def test_small_error_uses_minimum_step(self, coordinator):
+        """Small error (just outside deadband) uses step as minimum."""
+        # grid=70, deadband=50, step=100 → error=20, raw=max(100,20*0.8)=100
+        assert coordinator._calc_proportional_adjustment(70, 50, 100) == -100
+        # Negative direction
+        assert coordinator._calc_proportional_adjustment(-70, 50, 100) == 100
+
+    def test_large_error_scales_proportionally(self, coordinator):
+        """Large error produces proportional adjustment."""
+        # grid=700, deadband=50, step=100 → error=650, raw=max(100,650*0.8)=520→snap 500
+        assert coordinator._calc_proportional_adjustment(700, 50, 100) == -500
+        # Negative direction
+        assert coordinator._calc_proportional_adjustment(-700, 50, 100) == 500
+
+    def test_large_error_with_50w_step(self, coordinator):
+        """Large error with 50W step size (feed-in)."""
+        # grid=500, deadband=50, step=50 → error=450, raw=max(50,450*0.8)=360→snap 350
+        assert coordinator._calc_proportional_adjustment(500, 50, 50) == -350
+
+    def test_sign_convention(self, coordinator):
+        """Positive grid (import) → negative adj (reduce charge)."""
+        adj = coordinator._calc_proportional_adjustment(200, 50, 100)
+        assert adj < 0
+        # Negative grid (export) → positive adj (increase charge)
+        adj = coordinator._calc_proportional_adjustment(-200, 50, 100)
+        assert adj > 0
+
+    def test_exact_deadband_returns_zero(self, coordinator):
+        """Grid exactly at deadband boundary returns zero."""
+        assert coordinator._calc_proportional_adjustment(50, 50, 100) == 0
+        assert coordinator._calc_proportional_adjustment(-50, 50, 100) == 0
 
 
 # ── Charge power setter ─────────────────────────────────────────────
@@ -521,38 +567,39 @@ class TestAutomaticMode:
 class TestDynamicFeedIn:
     """Test dynamic feed-in power calculation in discharge state.
 
-    Dynamic feed-in uses GRADUAL adjustment (one 50W step per cycle)
-    to prevent oscillation from delayed grid sensor readings.
+    Dynamic feed-in uses PROPORTIONAL adjustment (scaled to grid error,
+    damped by 0.8 to prevent overshoot from sensor delay).
+    The configured step size acts as the minimum adjustment.
     """
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_ramps_up_one_step(self, coordinator, mock_hass):
-        """Dynamic feed-in increases by one step when grid import > tolerance."""
+    async def test_dynamic_feed_in_ramps_up_proportional(self, coordinator, mock_hass):
+        """Dynamic feed-in increases proportionally when grid import > tolerance."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 0  # starting from 0
 
-        # grid=500, tolerance=50 → grid > tolerance → ramp up by 50W
+        # grid=500, tolerance=50 → error=450, adj=max(50,450*0.8)=360→snap 350
         await coordinator._run_automatic(
             grid_power=500, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 50  # 0 + 50
+        assert coordinator._current_feed_in_power == 350  # 0 + 350
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_ramps_up_from_existing(self, coordinator, mock_hass):
-        """Dynamic feed-in increases from current value by one step."""
+        """Dynamic feed-in increases proportionally from current value."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 300
         coordinator._last_feed_in_power = 300
 
-        # grid=500, tolerance=50 → ramp up 300 → 350
+        # grid=500, tolerance=50 → error=450, adj=350, new=300+350=650
         await coordinator._run_automatic(
             grid_power=500, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 350  # 300 + 50
+        assert coordinator._current_feed_in_power == 650  # 300 + 350
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_clamped_to_max(self, coordinator, mock_hass):
@@ -571,18 +618,18 @@ class TestDynamicFeedIn:
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_ramps_down_on_export(self, coordinator, mock_hass):
-        """Dynamic feed-in decreases by one step when grid export > tolerance."""
+        """Dynamic feed-in decreases proportionally when grid export > tolerance."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 400
         coordinator._last_feed_in_power = 400
 
-        # grid=-100 (exporting), tolerance=50 → ramp down 400 → 350
+        # grid=-100 (exporting), tolerance=50 → error=50, adj=max(50,50*0.8)=50
         await coordinator._run_automatic(
             grid_power=-100, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 350  # 400 - 50
+        assert coordinator._current_feed_in_power == 350  # 400 - 50 (minimum step)
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_holds_within_tolerance(self, coordinator, mock_hass):
@@ -614,20 +661,38 @@ class TestDynamicFeedIn:
         assert coordinator._current_feed_in_power == 0
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_converges_over_cycles(self, coordinator, mock_hass):
-        """Multiple cycles gradually approach target feed-in."""
+    async def test_dynamic_feed_in_converges_fast(self, coordinator, mock_hass):
+        """Proportional adjustment converges within 2-3 cycles instead of 10."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 0
 
-        # Simulate 5 cycles with consistent high grid import
-        for i in range(5):
+        # Simulate 3 cycles with consistent high grid import
+        # Cycle 1: error=450, adj=350 → 350
+        # Cycle 2: error=450, adj=350 → 700
+        # Cycle 3: error=450, adj=350 → 1050 clamped to 800
+        for i in range(3):
             await coordinator._run_automatic(
                 grid_power=500, solar_power=0, battery_soc=50
             )
-        # After 5 cycles: 0 → 50 → 100 → 150 → 200 → 250
-        assert coordinator._current_feed_in_power == 250
+        # Reaches max_feed_in (800) within 3 cycles
+        assert coordinator._current_feed_in_power == 800
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_small_error_uses_min_step(self, coordinator, mock_hass):
+        """Small grid error uses minimum step size (50W)."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 200
+        coordinator._last_feed_in_power = 200
+
+        # grid=80, tolerance=50 → error=30, adj=max(50, 30*0.8)=50
+        await coordinator._run_automatic(
+            grid_power=80, solar_power=0, battery_soc=50
+        )
+        assert coordinator._current_feed_in_power == 250  # 200 + 50 (min step)
 
 
 # ── Solar surplus detection ──────────────────────────────────────────
