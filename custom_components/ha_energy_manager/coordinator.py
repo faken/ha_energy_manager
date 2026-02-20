@@ -124,6 +124,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._current_solar_power: float = 0.0
         self._current_battery_soc: float = 0.0
 
+        # Last known valid battery SOC (protects against integration restarts
+        # that briefly report 0% or unavailable)
+        self._last_valid_battery_soc: float | None = None
+
         # Decision log ring buffer
         self._log_buffer: deque[dict] = deque(maxlen=DEFAULT_LOG_BUFFER_SIZE)
 
@@ -283,6 +287,54 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         if state is None or state.state in ("unknown", "unavailable"):
             return None
         return state.state
+
+    def _read_battery_soc(self) -> float:
+        """Read battery SOC with stale-value protection.
+
+        When the EcoFlow integration restarts, the sensor briefly reports
+        unavailable or 0%.  Use the last known good value to prevent the
+        FSM from incorrectly stopping discharge.
+        """
+        entity_id = self._entity_ids[CONF_BATTERY_SOC_SENSOR]
+        state = self.hass.states.get(entity_id)
+
+        # Entity unavailable / unknown → use last known good value
+        if state is None or state.state in ("unknown", "unavailable"):
+            if self._last_valid_battery_soc is not None:
+                _LOGGER.warning(
+                    "Battery SOC sensor %s is %s, using last known value %.0f%%",
+                    entity_id,
+                    "missing" if state is None else state.state,
+                    self._last_valid_battery_soc,
+                )
+                return self._last_valid_battery_soc
+            return 0.0
+
+        try:
+            soc = float(state.state)
+        except (ValueError, TypeError):
+            if self._last_valid_battery_soc is not None:
+                return self._last_valid_battery_soc
+            return 0.0
+
+        # A real battery cannot drop from e.g. 50% to 0% between two update
+        # cycles.  If the last known value was well above 0%, treat a sudden
+        # 0% as a sensor glitch (integration restart).
+        if (
+            soc == 0.0
+            and self._last_valid_battery_soc is not None
+            and self._last_valid_battery_soc > 5.0
+        ):
+            _LOGGER.warning(
+                "Battery SOC dropped from %.0f%% to 0%% "
+                "(likely EcoFlow integration restart), using last known value",
+                self._last_valid_battery_soc,
+            )
+            return self._last_valid_battery_soc
+
+        # Accept as valid
+        self._last_valid_battery_soc = soc
+        return soc
 
     def _dwell_time_exceeded(self) -> bool:
         """Check if minimum dwell time in current state has been exceeded."""
@@ -459,9 +511,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._current_solar_power = self._get_entity_state_float(
             self._entity_ids[CONF_SOLAR_POWER_SENSOR]
         )
-        self._current_battery_soc = self._get_entity_state_float(
-            self._entity_ids[CONF_BATTERY_SOC_SENSOR]
-        )
+        self._current_battery_soc = self._read_battery_soc()
 
         grid_power = self._current_grid_power
         solar_power = self._current_solar_power
