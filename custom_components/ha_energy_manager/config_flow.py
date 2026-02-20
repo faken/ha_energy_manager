@@ -29,6 +29,7 @@ from .const import (
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
     DEFAULT_FEED_IN_MODE,
+    DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_GRID_FEED_IN_POWER,
@@ -44,6 +45,7 @@ from .const import (
     OPT_CHARGE_POWER_STEP,
     OPT_DEADBAND,
     OPT_FEED_IN_MODE,
+    OPT_FEED_IN_POWER_STEP,
     OPT_FEED_IN_STATIC_POWER,
     OPT_GRID_POWER_TOLERANCE_DISCHARGE,
     OPT_MAX_CHARGE_POWER,
@@ -227,6 +229,20 @@ def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 )
             ),
             vol.Required(
+                OPT_FEED_IN_POWER_STEP,
+                default=options.get(
+                    OPT_FEED_IN_POWER_STEP, DEFAULT_FEED_IN_POWER_STEP
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=10,
+                    max=200,
+                    step=10,
+                    unit_of_measurement="W",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
                 OPT_MIN_DWELL_TIME,
                 default=options.get(OPT_MIN_DWELL_TIME, DEFAULT_MIN_DWELL_TIME),
             ): NumberSelector(
@@ -267,6 +283,7 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
                     OPT_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL,
                     OPT_DEADBAND: DEFAULT_DEADBAND,
                     OPT_CHARGE_POWER_STEP: DEFAULT_CHARGE_POWER_STEP,
+                    OPT_FEED_IN_POWER_STEP: DEFAULT_FEED_IN_POWER_STEP,
                     OPT_MIN_DWELL_TIME: DEFAULT_MIN_DWELL_TIME,
                 },
             )
