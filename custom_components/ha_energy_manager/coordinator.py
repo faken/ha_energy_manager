@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -242,6 +243,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         if step is None:
             step = self._get_option(OPT_CHARGE_POWER_STEP, DEFAULT_CHARGE_POWER_STEP)
         return int(round(value / step) * step)
+
+    def _snap_to_step_ceil(self, value: float, step: float) -> int:
+        """Round a value UP to the next step increment."""
+        return int(math.ceil(value / step) * step)
 
     def _calc_proportional_adjustment(
         self,
@@ -824,8 +829,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             if grid_power > grid_tolerance:
                 # Grid import exceeds tolerance → increase feed-in (proportional)
                 error = grid_power - grid_tolerance
-                raw = max(feed_in_step, error * DEFAULT_PROPORTIONAL_DAMPING)
-                feed_in_adj = self._snap_to_step(raw, feed_in_step)
+                feed_in_adj = self._snap_to_step(
+                    error * DEFAULT_PROPORTIONAL_DAMPING, feed_in_step
+                )
                 new_feed_in = min(current_feed_in + feed_in_adj, max_feed_in)
                 reason = (
                     f"Dynamic feed-in: grid import {grid_power:.0f}W > tolerance "
@@ -833,10 +839,12 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                     f"→ {new_feed_in:.0f}W"
                 )
             elif grid_power < 0:
-                # Any grid export → feeding in too much → reduce (proportional)
+                # Any grid export → feeding in too much → reduce (ceil to ensure
+                # even small exports trigger at least one step correction)
                 error = abs(grid_power)
-                raw = max(feed_in_step, error * DEFAULT_PROPORTIONAL_DAMPING)
-                feed_in_adj = self._snap_to_step(raw, feed_in_step)
+                feed_in_adj = self._snap_to_step_ceil(
+                    error * DEFAULT_PROPORTIONAL_DAMPING, feed_in_step
+                )
                 new_feed_in = max(current_feed_in - feed_in_adj, 0)
                 reason = (
                     f"Dynamic feed-in: grid export {abs(grid_power):.0f}W, "

@@ -813,19 +813,19 @@ class TestDynamicFeedIn:
         assert coordinator._current_feed_in_power == 800
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_small_error_uses_min_step(self, coordinator, mock_hass):
-        """Small grid error uses minimum step size (50W)."""
+    async def test_dynamic_feed_in_holds_on_small_import_error(self, coordinator, mock_hass):
+        """Small import error (below half-step) rounds to zero → hold steady."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 200
         coordinator._last_feed_in_power = 200
 
-        # grid=80, tolerance=50 → error=30, adj=max(50, 30*0.8)=50
+        # grid=80, tolerance=50 → error=30, 30*0.8=24 → snap(24,50)=0 → hold
         await coordinator._run_automatic(
             grid_power=80, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 250  # 200 + 50 (min step)
+        assert coordinator._current_feed_in_power == 200  # hold, error too small
 
 
 # ── Solar surplus detection ──────────────────────────────────────────
