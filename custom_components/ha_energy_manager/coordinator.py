@@ -376,36 +376,45 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         current_state = self._get_entity_state_str(entity_id)
         if self._last_ps_mode == mode and current_state == mode:
             return
-        await self.hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": entity_id, "option": mode},
-        )
-        self._last_ps_mode = mode
+        try:
+            await self.hass.services.async_call(
+                "select",
+                "select_option",
+                {"entity_id": entity_id, "option": mode},
+            )
+            self._last_ps_mode = mode
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set power supply mode to %s", mode)
 
     async def _async_set_charge_switch(self, on: bool) -> None:
         """Turn the charge Shelly relay on or off."""
         if self._last_charge_switch == on:
             return
         entity_id = self._entity_ids[CONF_CHARGE_SWITCH]
-        await self.hass.services.async_call(
-            "switch",
-            "turn_on" if on else "turn_off",
-            {"entity_id": entity_id},
-        )
-        self._last_charge_switch = on
+        try:
+            await self.hass.services.async_call(
+                "switch",
+                "turn_on" if on else "turn_off",
+                {"entity_id": entity_id},
+            )
+            self._last_charge_switch = on
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set charge switch to %s", on)
 
     async def _async_set_discharge_switch(self, on: bool) -> None:
         """Turn the discharge Shelly relay on or off."""
         if self._last_discharge_switch == on:
             return
         entity_id = self._entity_ids[CONF_DISCHARGE_SWITCH]
-        await self.hass.services.async_call(
-            "switch",
-            "turn_on" if on else "turn_off",
-            {"entity_id": entity_id},
-        )
-        self._last_discharge_switch = on
+        try:
+            await self.hass.services.async_call(
+                "switch",
+                "turn_on" if on else "turn_off",
+                {"entity_id": entity_id},
+            )
+            self._last_discharge_switch = on
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set discharge switch to %s", on)
 
     async def _async_set_charge_power(self, value: float, reason: str = "") -> None:
         """Set the max AC charging power (snapped to step).
@@ -437,11 +446,15 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         await self._async_set_charge_switch(True)
         await self._async_set_power_supply_mode(PS_MODE_PRIORITIZE_STORAGE)
         entity_id = self._entity_ids[CONF_MAX_CHARGE_POWER_NUMBER]
-        await self.hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": entity_id, "value": snapped},
-        )
+        try:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": snapped},
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set charge power to %dW", snapped)
+            return
         self._last_charge_power = snapped
         self._current_charge_power = snapped
 
@@ -494,11 +507,15 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             "set_feed_in_power calling number.set_value: entity=%s, value=%d",
             entity_id, snapped,
         )
-        await self.hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": entity_id, "value": snapped},
-        )
+        try:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": snapped},
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set feed-in power to %dW", snapped)
+            return
         self._last_feed_in_power = snapped
         self._current_feed_in_power = snapped
 
