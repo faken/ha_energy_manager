@@ -8,6 +8,6 @@
   "integration_type": "service",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "1.4.5",
+  "version": "1.4.6",
   "single_config_entry": true
 }
