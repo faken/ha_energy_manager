@@ -716,53 +716,74 @@ class TestDynamicFeedIn:
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_ramps_down_on_export(self, coordinator, mock_hass):
-        """Dynamic feed-in decreases proportionally on any grid export."""
+        """Grid export means we're far below target → proportional ramp down."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 400
         coordinator._last_feed_in_power = 400
 
-        # grid=-100 (exporting) → error=100, raw=max(50,100*0.8)=80→snap 100
+        # grid=-100, tol=50 → error=-150, adj=ceil(150*0.8/50)*50=ceil(2.4)*50=150
         await coordinator._run_automatic(
             grid_power=-100, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 300  # 400 - 100
+        assert coordinator._current_feed_in_power == 250  # 400 - 150
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_reduces_on_small_export(self, coordinator, mock_hass):
-        """Any grid export triggers feed-in reduction, even below old tolerance."""
+        """Small grid export is still below target → ramp down proportionally."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 800
         coordinator._last_feed_in_power = 800
 
-        # grid=-30 → any export reduces. error=30, raw=max(50,30*0.8)=50→snap 50
+        # grid=-30, tol=50 → error=-80, adj=ceil(80*0.8/50)*50=ceil(1.28)*50=100
         await coordinator._run_automatic(
             grid_power=-30, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 750  # 800 - 50
+        assert coordinator._current_feed_in_power == 700  # 800 - 100
 
     @pytest.mark.asyncio
-    async def test_dynamic_feed_in_holds_within_import_tolerance(
+    async def test_dynamic_feed_in_ramps_down_below_tolerance(
         self, coordinator, mock_config_entry, mock_hass
     ):
-        """Feed-in holds when grid import is between 0 and tolerance (asymmetric)."""
+        """Grid import below target tolerance → ramp down to reduce feed-in."""
         coordinator._active_mode = MODE_AUTOMATIC
         coordinator._fsm_state = STATE_DISCHARGE
         coordinator._fsm_state_entered_at = time.monotonic() - 120
         coordinator._current_feed_in_power = 400
         coordinator._last_feed_in_power = 400
 
-        # Set high tolerance
+        # Set tolerance=150 (target grid import)
         mock_config_entry.options["grid_power_tolerance_discharge"] = 150
 
-        # grid=100 → 0 <= 100 <= 150 → within tolerance → hold
+        # grid=100, tol=150 → error=-50, deadband=25, error < -25 → ramp down
+        # adj=ceil(50*0.8/50)*50=ceil(0.8)*50=50
         await coordinator._run_automatic(
             grid_power=100, solar_power=0, battery_soc=50
         )
-        assert coordinator._current_feed_in_power == 400  # unchanged
+        assert coordinator._current_feed_in_power == 350  # 400 - 50
+
+    @pytest.mark.asyncio
+    async def test_dynamic_feed_in_ramps_down_large_gap(
+        self, coordinator, mock_config_entry, mock_hass
+    ):
+        """Battery feeding in too much with grid well below target → large ramp down."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        coordinator._fsm_state = STATE_DISCHARGE
+        coordinator._fsm_state_entered_at = time.monotonic() - 120
+        coordinator._current_feed_in_power = 600
+        coordinator._last_feed_in_power = 600
+
+        # Scenario: 668W consumption, 600W feed-in → 68W grid import
+        # tolerance=200 (target), error=68-200=-132, deadband=25
+        # adj=ceil(132*0.8/50)*50=ceil(2.112)*50=150
+        mock_config_entry.options["grid_power_tolerance_discharge"] = 200
+        await coordinator._run_automatic(
+            grid_power=68, solar_power=0, battery_soc=50
+        )
+        assert coordinator._current_feed_in_power == 450  # 600 - 150
 
     @pytest.mark.asyncio
     async def test_dynamic_feed_in_holds_within_tolerance(self, coordinator, mock_hass):
