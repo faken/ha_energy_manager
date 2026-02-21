@@ -145,7 +145,7 @@ def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=0,
-                    max=200,
+                    max=1000,
                     step=10,
                     unit_of_measurement="W",
                     mode=NumberSelectorMode.SLIDER,
