@@ -820,42 +820,44 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             max_feed_in, current_feed_in,
         )
 
-        # Asymmetric feed-in adjustment:
-        # - Import side: use grid_tolerance (e.g. 150W) — only increase feed-in
-        #   when grid import exceeds the configured tolerance.
-        # - Export side: use 0W threshold — any grid export means we're feeding
-        #   in too much and wasting battery. Reduce immediately.
+        # Target-based feed-in regulation:
+        # The tolerance is the TARGET grid import — the battery should regulate
+        # so that grid_power ≈ grid_tolerance.  A positive error means we're
+        # importing too much (increase feed-in), negative means too little or
+        # exporting (decrease feed-in).
         if feed_in_mode == FEED_IN_DYNAMIC:
-            if grid_power > grid_tolerance:
-                # Grid import exceeds tolerance → increase feed-in (proportional)
-                error = grid_power - grid_tolerance
+            error = grid_power - grid_tolerance
+            deadband = feed_in_step / 2
+
+            if error > deadband:
+                # Grid import too far above target → increase feed-in
                 feed_in_adj = self._snap_to_step(
                     error * DEFAULT_PROPORTIONAL_DAMPING, feed_in_step
                 )
                 new_feed_in = min(current_feed_in + feed_in_adj, max_feed_in)
                 reason = (
-                    f"Dynamic feed-in: grid import {grid_power:.0f}W > tolerance "
-                    f"{grid_tolerance:.0f}W, increasing {current_feed_in:.0f}W "
-                    f"→ {new_feed_in:.0f}W"
+                    f"Dynamic feed-in: grid {grid_power:.0f}W above target "
+                    f"{grid_tolerance:.0f}W (error +{error:.0f}W), increasing "
+                    f"{current_feed_in:.0f}W → {new_feed_in:.0f}W"
                 )
-            elif grid_power < 0:
-                # Any grid export → feeding in too much → reduce (ceil to ensure
-                # even small exports trigger at least one step correction)
-                error = abs(grid_power)
+            elif error < -deadband:
+                # Grid import too far below target → decrease feed-in
                 feed_in_adj = self._snap_to_step_ceil(
-                    error * DEFAULT_PROPORTIONAL_DAMPING, feed_in_step
+                    abs(error) * DEFAULT_PROPORTIONAL_DAMPING, feed_in_step
                 )
                 new_feed_in = max(current_feed_in - feed_in_adj, 0)
                 reason = (
-                    f"Dynamic feed-in: grid export {abs(grid_power):.0f}W, "
-                    f"decreasing {current_feed_in:.0f}W → {new_feed_in:.0f}W"
+                    f"Dynamic feed-in: grid {grid_power:.0f}W below target "
+                    f"{grid_tolerance:.0f}W (error {error:.0f}W), decreasing "
+                    f"{current_feed_in:.0f}W → {new_feed_in:.0f}W"
                 )
             else:
-                # 0 <= grid <= tolerance → acceptable, hold steady
+                # Within deadband of target → hold steady
                 new_feed_in = current_feed_in
                 reason = (
-                    f"Dynamic feed-in: grid {grid_power:.0f}W within tolerance "
-                    f"0–{grid_tolerance:.0f}W, holding at {current_feed_in:.0f}W"
+                    f"Dynamic feed-in: grid {grid_power:.0f}W ≈ target "
+                    f"{grid_tolerance:.0f}W (error {error:.0f}W), holding at "
+                    f"{current_feed_in:.0f}W"
                 )
         else:
             new_feed_in = min(feed_in_static, max_feed_in)
