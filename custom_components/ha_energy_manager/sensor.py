@@ -188,5 +188,5 @@ class EnergyManagerDecisionLogSensor(
             "last_charge_power": last.get("charge_power", 0),
             "last_feed_in_power": last.get("feed_in_power", 0),
             "entry_count": len(entries),
-            "entries": entries,
+            "entries": entries[-20:],
         }
