@@ -195,9 +195,9 @@ def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 default=options.get(OPT_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=10,
+                    min=1,
                     max=120,
-                    step=5,
+                    step=1,
                     unit_of_measurement="s",
                     mode=NumberSelectorMode.BOX,
                 )
