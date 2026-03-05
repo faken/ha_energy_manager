@@ -19,6 +19,10 @@ from custom_components.ha_energy_manager.const import (
     CONF_SOLAR_POWER_SENSOR,
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
+    DEFAULT_EV_CHARGER_PHASES,
+    DEFAULT_EV_MAX_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_EXCESS_POWER,
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_STATIC_POWER,
     DEFAULT_LOG_BUFFER_SIZE,
@@ -31,6 +35,12 @@ from custom_components.ha_energy_manager.const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_HOLD,
+    OPT_EV_CHARGER_CURRENT_NUMBER,
+    OPT_EV_CHARGER_PHASES,
+    OPT_EV_CHARGER_SWITCH,
+    OPT_EV_MAX_CHARGING_CURRENT,
+    OPT_EV_MIN_CHARGING_CURRENT,
+    OPT_EV_MIN_EXCESS_POWER,
     STATE_HOLD,
 )
 
@@ -60,6 +70,16 @@ DEFAULT_OPTIONS = {
     "deadband": DEFAULT_DEADBAND,
     "charge_power_step": DEFAULT_CHARGE_POWER_STEP,
     "min_dwell_time": DEFAULT_MIN_DWELL_TIME,
+}
+
+
+EV_OPTIONS = {
+    OPT_EV_CHARGER_SWITCH: "switch.ev_charger",
+    OPT_EV_CHARGER_CURRENT_NUMBER: "number.ev_current",
+    OPT_EV_MIN_EXCESS_POWER: DEFAULT_EV_MIN_EXCESS_POWER,
+    OPT_EV_MIN_CHARGING_CURRENT: DEFAULT_EV_MIN_CHARGING_CURRENT,
+    OPT_EV_MAX_CHARGING_CURRENT: DEFAULT_EV_MAX_CHARGING_CURRENT,
+    OPT_EV_CHARGER_PHASES: DEFAULT_EV_CHARGER_PHASES,
 }
 
 
@@ -125,5 +145,30 @@ def coordinator(mock_hass, mock_config_entry):
     coord.update_interval = None
 
     # Bypass dwell time for tests by default
+    coord._fsm_state_entered_at = time.monotonic() - 120
+    return coord
+
+
+@pytest.fixture
+def ev_coordinator(mock_hass, mock_config_entry):
+    """Create a coordinator with EV entities configured."""
+    from custom_components.ha_energy_manager.coordinator import (
+        EnergyManagerCoordinator,
+    )
+
+    # Add EV options to config entry
+    mock_config_entry.options.update(EV_OPTIONS)
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        lambda self, *args, **kwargs: None,
+    ):
+        coord = EnergyManagerCoordinator(
+            mock_hass, mock_config_entry, entity_ids=dict(MOCK_ENTITY_IDS)
+        )
+    coord.hass = mock_hass
+    coord.logger = MagicMock()
+    coord.name = DOMAIN
+    coord.update_interval = None
     coord._fsm_state_entered_at = time.monotonic() - 120
     return coord

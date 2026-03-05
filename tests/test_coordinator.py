@@ -13,19 +13,23 @@ from custom_components.ha_energy_manager.const import (
     CONF_DISCHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_NUMBER,
     CONF_POWER_SUPPLY_MODE_SELECT,
+    DEFAULT_EV_START_DELAY_CYCLES,
+    DEFAULT_EV_STOP_DELAY_CYCLES,
+    DEFAULT_EV_VOLTAGE,
     DEFAULT_LOG_BUFFER_SIZE,
     DEFAULT_PROPORTIONAL_DAMPING,
     MODE_AUTOMATIC,
     MODE_FORCED_CHARGE,
     MODE_HOLD,
     MODE_SOLAR,
+    OPT_EV_CHARGER_PHASES,
     PS_MODE_PRIORITIZE_STORAGE,
     PS_MODE_PRIORITIZE_SUPPLY,
     STATE_CHARGE,
     STATE_DISCHARGE,
     STATE_HOLD,
 )
-from tests.conftest import make_state
+from tests.conftest import EV_OPTIONS, make_state
 
 
 # ── Battery SOC stale-value protection ────────────────────────────────
@@ -944,3 +948,172 @@ class TestEnabled:
         assert coordinator._last_ps_mode is None
         assert coordinator._last_charge_switch is None
         assert coordinator._last_discharge_switch is None
+
+
+# ── EV Surplus Charging ──────────────────────────────────────────────
+
+
+class TestEVCharging:
+    """Test EV surplus charging overlay logic."""
+
+    @pytest.mark.asyncio
+    async def test_ev_not_configured_is_noop(self, coordinator, mock_hass):
+        """Without EV entities configured, EV charging does nothing."""
+        coordinator._active_mode = MODE_AUTOMATIC
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+
+        data = await coordinator._async_update_data()
+        assert data.ev_charging_active is False
+        assert data.ev_charging_current == 0.0
+        assert data.ev_charging_power == 0.0
+
+    @pytest.mark.asyncio
+    async def test_ev_starts_after_delay_cycles(self, ev_coordinator, mock_hass):
+        """EV charging starts after DEFAULT_EV_START_DELAY_CYCLES of sufficient excess."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        # SOC 100%, large grid export (surplus)
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-2000)
+
+        # Run cycles: should NOT start before delay
+        for i in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            data = await ev_coordinator._async_update_data()
+            assert data.ev_charging_active is False, f"Should not be active at cycle {i+1}"
+
+        # One more cycle: should start now
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+        assert data.ev_charging_current > 0
+
+    @pytest.mark.asyncio
+    async def test_ev_does_not_start_below_soc_threshold(self, ev_coordinator, mock_hass):
+        """EV charging does not start when SOC < 100%."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(95)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-2000)
+
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES + 2):
+            data = await ev_coordinator._async_update_data()
+            assert data.ev_charging_active is False
+
+    @pytest.mark.asyncio
+    async def test_ev_stops_on_soc_drop(self, ev_coordinator, mock_hass):
+        """EV charging stops immediately when SOC drops below 100%."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-2000)
+
+        # Start EV charging
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            await ev_coordinator._async_update_data()
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+
+        # SOC drops
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(98)
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is False
+
+    @pytest.mark.asyncio
+    async def test_ev_stops_after_deficit_delay(self, ev_coordinator, mock_hass):
+        """EV charging stops after DEFAULT_EV_STOP_DELAY_CYCLES of insufficient excess."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-2000)
+
+        # Start EV charging (3 cycles for delay)
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            await ev_coordinator._async_update_data()
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+
+        # Now set high grid import to create deficit even after accounting
+        # for EV own consumption (8A * 230V = 1840W add-back)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(3000)
+
+        # Should still be active during deficit delay
+        for i in range(DEFAULT_EV_STOP_DELAY_CYCLES - 1):
+            data = await ev_coordinator._async_update_data()
+            assert data.ev_charging_active is True, f"Should still be active at deficit cycle {i+1}"
+
+        # One more cycle: should stop
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is False
+
+    @pytest.mark.asyncio
+    async def test_ev_adjusts_current_to_match_excess(self, ev_coordinator, mock_hass):
+        """EV charging current adjusts proportionally to available excess."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-3000)
+
+        # Start EV charging (start happens on the last cycle)
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            await ev_coordinator._async_update_data()
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+        # 3000W / 230V / 1 phase = 13.04A → 13A
+        assert data.ev_charging_current == 13
+
+        # Reduce excess: account for current EV consumption
+        # EV currently uses 13A * 230V = 2990W
+        # New grid = -1500W → available = 1500 + 2990 = 4490W → 19.5A → clamped to 16A (max)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-1500)
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_current == 16  # clamped to max
+
+    @pytest.mark.asyncio
+    async def test_ev_accounts_for_own_consumption(self, ev_coordinator, mock_hass):
+        """Available excess calculation accounts for EV's own power draw."""
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-2000)
+
+        # Start charging (start happens on last cycle)
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            await ev_coordinator._async_update_data()
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+        initial_current = data.ev_charging_current
+        # 2000W / 230V = 8.7A → 8A
+        assert initial_current == 8
+
+        # Now grid shows 0W (because EV is consuming exactly the surplus)
+        # EV power = 8A * 230V = 1840W
+        # available = -0 + 1840 = 1840W → 1840/230 = 8A
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(0)
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+        assert data.ev_charging_current == 8  # Stays at 8A
+
+    @pytest.mark.asyncio
+    async def test_ev_three_phase_calculation(self, ev_coordinator, mock_config_entry, mock_hass):
+        """3-phase EV charger: power = amps * 230V * 3 = 690W per amp."""
+        mock_config_entry.options[OPT_EV_CHARGER_PHASES] = 3
+        ev_coordinator._active_mode = MODE_AUTOMATIC
+        ev_coordinator._fsm_state = STATE_HOLD
+
+        mock_hass._sensor_states["sensor.battery_soc"] = make_state(100)
+        mock_hass._sensor_states["sensor.grid_power"] = make_state(-5000)
+
+        # Start charging (start happens on last cycle)
+        for _ in range(DEFAULT_EV_START_DELAY_CYCLES - 1):
+            await ev_coordinator._async_update_data()
+        data = await ev_coordinator._async_update_data()
+        assert data.ev_charging_active is True
+        # 5000W / (230V * 3) = 7.25A → 7A
+        assert data.ev_charging_current == 7
+        # Power = 7A * 230V * 3 = 4830W
+        assert data.ev_charging_power == 7 * DEFAULT_EV_VOLTAGE * 3

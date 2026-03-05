@@ -25,6 +25,13 @@ from .const import (
     CONF_SOLAR_POWER_SENSOR,
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
+    DEFAULT_EV_MAX_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_EXCESS_POWER,
+    DEFAULT_EV_CHARGER_PHASES,
+    DEFAULT_EV_START_DELAY_CYCLES,
+    DEFAULT_EV_STOP_DELAY_CYCLES,
+    DEFAULT_EV_VOLTAGE,
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
@@ -46,6 +53,12 @@ from .const import (
     MODE_SOLAR,
     OPT_CHARGE_POWER_STEP,
     OPT_DEADBAND,
+    OPT_EV_CHARGER_CURRENT_NUMBER,
+    OPT_EV_CHARGER_PHASES,
+    OPT_EV_CHARGER_SWITCH,
+    OPT_EV_MAX_CHARGING_CURRENT,
+    OPT_EV_MIN_CHARGING_CURRENT,
+    OPT_EV_MIN_EXCESS_POWER,
     OPT_FEED_IN_MODE,
     OPT_FEED_IN_POWER_STEP,
     OPT_FEED_IN_STATIC_POWER,
@@ -85,6 +98,9 @@ class EnergyManagerData:
     feed_in_power: float = 0.0
     charge_power: float = 0.0
     is_enabled: bool = True
+    ev_charging_active: bool = False
+    ev_charging_current: float = 0.0
+    ev_charging_power: float = 0.0
     log_entries: list[dict] = field(default_factory=list)
 
 
@@ -128,6 +144,14 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         # Last known valid battery SOC (protects against integration restarts
         # that briefly report 0% or unavailable)
         self._last_valid_battery_soc: float | None = None
+
+        # EV charging state
+        self._ev_charging_active: bool = False
+        self._ev_charging_current: float = 0.0
+        self._last_ev_switch: bool | None = None
+        self._last_ev_current: float | None = None
+        self._ev_excess_counter: int = 0
+        self._ev_deficit_counter: int = 0
 
         # Decision log ring buffer
         self._log_buffer: deque[dict] = deque(maxlen=DEFAULT_LOG_BUFFER_SIZE)
@@ -203,6 +227,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_ps_mode = None
         self._last_charge_switch = None
         self._last_discharge_switch = None
+        # Reset EV hysteresis counters
+        self._ev_excess_counter = 0
+        self._ev_deficit_counter = 0
 
         self._log_decision(
             LOG_MODE_CHANGE,
@@ -226,6 +253,13 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             self._last_ps_mode = None
             self._last_charge_switch = None
             self._last_discharge_switch = None
+            # Reset EV state
+            self._ev_charging_active = False
+            self._ev_charging_current = 0.0
+            self._ev_excess_counter = 0
+            self._ev_deficit_counter = 0
+            self._last_ev_switch = None
+            self._last_ev_current = None
 
         if old_value != value:
             self._log_decision(
@@ -522,6 +556,144 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         log_reason = reason or f"Feed-in power {old_power}W → {snapped}W"
         self._log_decision(LOG_POWER_ADJUST, log_reason)
 
+    # ── EV charging ──────────────────────────────────────────────────────
+
+    @property
+    def _ev_configured(self) -> bool:
+        """Return True if EV charger entities are configured."""
+        switch = self._get_option(OPT_EV_CHARGER_SWITCH, None)
+        current = self._get_option(OPT_EV_CHARGER_CURRENT_NUMBER, None)
+        return bool(switch and current)
+
+    async def _async_set_ev_switch(self, on: bool) -> None:
+        """Turn the EV charger switch on or off."""
+        if self._last_ev_switch == on:
+            return
+        entity_id = self._get_option(OPT_EV_CHARGER_SWITCH, "")
+        try:
+            await self.hass.services.async_call(
+                "switch",
+                "turn_on" if on else "turn_off",
+                {"entity_id": entity_id},
+            )
+            self._last_ev_switch = on
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set EV charger switch to %s", on)
+
+    async def _async_set_ev_current(self, amps: float) -> None:
+        """Set the EV charging current via number.set_value."""
+        min_amps = self._get_option(
+            OPT_EV_MIN_CHARGING_CURRENT, DEFAULT_EV_MIN_CHARGING_CURRENT
+        )
+        max_amps = self._get_option(
+            OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
+        )
+        clamped = int(max(min(amps, max_amps), min_amps))
+        if self._last_ev_current == clamped:
+            return
+        entity_id = self._get_option(OPT_EV_CHARGER_CURRENT_NUMBER, "")
+        try:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": clamped},
+            )
+            self._last_ev_current = clamped
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to set EV charging current to %dA", clamped)
+
+    async def _stop_ev_charging(self, reason: str) -> None:
+        """Stop EV charging and reset state."""
+        if self._ev_charging_active:
+            self._log_decision(LOG_POWER_ADJUST, f"EV charging stopped: {reason}")
+        await self._async_set_ev_switch(False)
+        self._ev_charging_active = False
+        self._ev_charging_current = 0.0
+        self._ev_excess_counter = 0
+        self._ev_deficit_counter = 0
+
+    async def _handle_ev_charging(self, grid_power: float, battery_soc: float) -> None:
+        """Handle EV surplus charging overlay logic."""
+        if not self._ev_configured:
+            return
+
+        min_excess = self._get_option(
+            OPT_EV_MIN_EXCESS_POWER, DEFAULT_EV_MIN_EXCESS_POWER
+        )
+        min_amps = self._get_option(
+            OPT_EV_MIN_CHARGING_CURRENT, DEFAULT_EV_MIN_CHARGING_CURRENT
+        )
+        max_amps = self._get_option(
+            OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
+        )
+        phases = self._get_option(OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES)
+        voltage = DEFAULT_EV_VOLTAGE
+
+        # Calculate current EV power consumption for available-power calculation
+        current_ev_power = self._ev_charging_current * voltage * phases
+
+        # Available excess: negative grid = export, add back our own EV consumption
+        available = -grid_power + current_ev_power
+
+        # SOC check: battery must be at 100% for EV charging
+        if battery_soc < 100.0:
+            if self._ev_charging_active:
+                await self._stop_ev_charging(
+                    f"Battery SOC {battery_soc:.0f}% < 100%, stopping EV"
+                )
+            self._ev_excess_counter = 0
+            self._ev_deficit_counter = 0
+            return
+
+        if self._ev_charging_active:
+            # Currently charging: adjust current or stop
+            target_amps = int(available / (voltage * phases))
+
+            if target_amps < min_amps:
+                # Deficit: not enough power for minimum charging
+                self._ev_deficit_counter += 1
+                self._ev_excess_counter = 0
+                if self._ev_deficit_counter >= DEFAULT_EV_STOP_DELAY_CYCLES:
+                    await self._stop_ev_charging(
+                        f"Insufficient excess for {self._ev_deficit_counter} cycles "
+                        f"(available {available:.0f}W, need {min_amps * voltage * phases:.0f}W)"
+                    )
+            else:
+                # Enough power: adjust current
+                self._ev_deficit_counter = 0
+                clamped = int(max(min(target_amps, max_amps), min_amps))
+                if clamped != self._ev_charging_current:
+                    old_current = self._ev_charging_current
+                    self._ev_charging_current = clamped
+                    await self._async_set_ev_current(clamped)
+                    self._log_decision(
+                        LOG_POWER_ADJUST,
+                        f"EV current adjusted: {old_current:.0f}A → {clamped}A "
+                        f"(available {available:.0f}W)",
+                    )
+        else:
+            # Not charging: check if we should start
+            if available >= min_excess:
+                self._ev_excess_counter += 1
+                self._ev_deficit_counter = 0
+                if self._ev_excess_counter >= DEFAULT_EV_START_DELAY_CYCLES:
+                    # Start charging
+                    target_amps = int(available / (voltage * phases))
+                    clamped = int(max(min(target_amps, max_amps), min_amps))
+                    self._ev_charging_active = True
+                    self._ev_charging_current = clamped
+                    await self._async_set_ev_current(clamped)
+                    await self._async_set_ev_switch(True)
+                    self._log_decision(
+                        LOG_POWER_ADJUST,
+                        f"EV charging started at {clamped}A "
+                        f"(available {available:.0f}W, "
+                        f"after {self._ev_excess_counter} stable cycles)",
+                    )
+                    self._ev_excess_counter = 0
+            else:
+                self._ev_excess_counter = 0
+
     # ── Update cycle ─────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> EnergyManagerData:
@@ -550,6 +722,13 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             elif self._active_mode == MODE_AUTOMATIC:
                 await self._run_automatic(grid_power, solar_power, battery_soc)
 
+            # EV surplus charging overlay (active in all modes)
+            await self._handle_ev_charging(grid_power, battery_soc)
+
+        ev_power = self._ev_charging_current * DEFAULT_EV_VOLTAGE * self._get_option(
+            OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES
+        ) if self._ev_charging_active else 0.0
+
         return EnergyManagerData(
             grid_power=grid_power,
             solar_power=solar_power,
@@ -559,6 +738,9 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             feed_in_power=self._current_feed_in_power,
             charge_power=self._current_charge_power,
             is_enabled=self._is_enabled,
+            ev_charging_active=self._ev_charging_active,
+            ev_charging_current=self._ev_charging_current,
+            ev_charging_power=ev_power,
             log_entries=list(self._log_buffer),
         )
 

@@ -55,6 +55,25 @@
           "feed_in_power_step": "Step size for feed-in power adjustments per cycle.",
           "min_dwell_time": "Minimum time to stay in a state before transitioning (seconds)."
         }
+      },
+      "ev": {
+        "title": "EV Charging Settings",
+        "data": {
+          "ev_charger_switch": "EV Charger Switch",
+          "ev_charger_current_number": "EV Charger Current Control",
+          "ev_min_excess_power": "Min Excess Power to Start",
+          "ev_min_charging_current": "Min Charging Current",
+          "ev_max_charging_current": "Max Charging Current",
+          "ev_charger_phases": "Charger Phases"
+        },
+        "data_description": {
+          "ev_charger_switch": "Switch entity that starts/stops the EV charger. Leave empty to disable EV charging.",
+          "ev_charger_current_number": "Number entity to control the charging current (amps). Leave empty to disable EV charging.",
+          "ev_min_excess_power": "Minimum excess solar power (watts) before EV charging starts.",
+          "ev_min_charging_current": "Minimum charging current in amps (usually 6A per EV standard).",
+          "ev_max_charging_current": "Maximum charging current in amps.",
+          "ev_charger_phases": "Number of phases used by the EV charger."
+        }
       }
     }
   },
@@ -68,6 +87,12 @@
       },
       "decision_log": {
         "name": "Decision Log"
+      },
+      "ev_charging_status": {
+        "name": "EV Charging Status"
+      },
+      "ev_charging_current": {
+        "name": "EV Charging Current"
       }
     },
     "select": {
