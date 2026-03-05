@@ -392,14 +392,14 @@ def _ev_options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(
                 OPT_EV_CHARGER_PHASES,
-                default=options.get(
+                default=str(options.get(
                     OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES
-                ),
+                )),
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=[
-                        {"label": "1 Phase", "value": 1},
-                        {"label": "3 Phases", "value": 3},
+                        {"label": "1 Phase", "value": "1"},
+                        {"label": "3 Phases", "value": "3"},
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
                 )

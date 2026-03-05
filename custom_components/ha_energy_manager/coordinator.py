@@ -626,7 +626,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         max_amps = self._get_option(
             OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
         )
-        phases = self._get_option(OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES)
+        phases = int(self._get_option(OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES))
         voltage = DEFAULT_EV_VOLTAGE
 
         # Calculate current EV power consumption for available-power calculation
@@ -725,8 +725,8 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             # EV surplus charging overlay (active in all modes)
             await self._handle_ev_charging(grid_power, battery_soc)
 
-        ev_power = self._ev_charging_current * DEFAULT_EV_VOLTAGE * self._get_option(
-            OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES
+        ev_power = self._ev_charging_current * DEFAULT_EV_VOLTAGE * int(
+            self._get_option(OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES)
         ) if self._ev_charging_active else 0.0
 
         return EnergyManagerData(
