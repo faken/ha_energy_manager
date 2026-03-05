@@ -369,7 +369,7 @@ def _ev_options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=6,
+                    min=5,
                     max=16,
                     step=1,
                     unit_of_measurement="A",
@@ -383,7 +383,7 @@ def _ev_options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=6,
+                    min=5,
                     max=32,
                     step=1,
                     unit_of_measurement="A",
