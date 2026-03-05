@@ -84,8 +84,17 @@ ENTITY_SCHEMA = vol.Schema(
         vol.Required(CONF_DISCHARGE_SWITCH): EntitySelector(
             EntitySelectorConfig(domain="switch")
         ),
+        vol.Optional(OPT_EV_CHARGER_SWITCH): EntitySelector(
+            EntitySelectorConfig(domain="switch")
+        ),
+        vol.Optional(OPT_EV_CHARGER_CURRENT_NUMBER): EntitySelector(
+            EntitySelectorConfig(domain="number")
+        ),
     }
 )
+
+# Keys that belong in options, not data (when submitted via setup flow)
+_EV_ENTITY_KEYS = {OPT_EV_CHARGER_SWITCH, OPT_EV_CHARGER_CURRENT_NUMBER}
 
 
 def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
@@ -278,6 +287,12 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the entity selection step."""
         if user_input is not None:
+            # Extract optional EV entity IDs → store in options (not data)
+            ev_options: dict[str, Any] = {}
+            for key in _EV_ENTITY_KEYS:
+                if key in user_input:
+                    ev_options[key] = user_input.pop(key)
+
             return self.async_create_entry(
                 title="Energy Manager",
                 data=user_input,
@@ -295,6 +310,7 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
                     OPT_CHARGE_POWER_STEP: DEFAULT_CHARGE_POWER_STEP,
                     OPT_FEED_IN_POWER_STEP: DEFAULT_FEED_IN_POWER_STEP,
                     OPT_MIN_DWELL_TIME: DEFAULT_MIN_DWELL_TIME,
+                    **ev_options,
                 },
             )
 
