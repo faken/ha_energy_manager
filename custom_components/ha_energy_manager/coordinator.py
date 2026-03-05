@@ -566,10 +566,16 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         return bool(switch and current)
 
     async def _async_set_ev_switch(self, on: bool) -> None:
-        """Turn the EV charger switch on or off."""
-        if self._last_ev_switch == on:
-            return
+        """Turn the EV charger switch on or off.
+
+        Checks both the internally tracked value and the actual entity state
+        to detect external changes (e.g. manual toggle or automation).
+        """
         entity_id = self._get_option(OPT_EV_CHARGER_SWITCH, "")
+        current_state = self._get_entity_state_str(entity_id)
+        expected_state = "on" if on else "off"
+        if self._last_ev_switch == on and current_state == expected_state:
+            return
         try:
             await self.hass.services.async_call(
                 "switch",
