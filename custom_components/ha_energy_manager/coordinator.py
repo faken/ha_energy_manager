@@ -641,6 +641,15 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 await self._stop_ev_charging(
                     f"Battery SOC {battery_soc:.0f}% < 100%, stopping EV"
                 )
+            else:
+                # Also stop manually-started charging
+                ev_switch = self._get_option(OPT_EV_CHARGER_SWITCH, "")
+                if self._get_entity_state_str(ev_switch) == "on":
+                    await self._async_set_ev_switch(False)
+                    self._log_decision(
+                        LOG_POWER_ADJUST,
+                        f"EV charger on but SOC {battery_soc:.0f}% < 100%, turning off",
+                    )
             self._ev_excess_counter = 0
             self._ev_deficit_counter = 0
             return
