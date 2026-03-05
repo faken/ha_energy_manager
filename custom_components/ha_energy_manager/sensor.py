@@ -8,7 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower
+from homeassistant.const import PERCENTAGE, UnitOfElectricCurrent, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -54,6 +54,14 @@ async def async_setup_entry(
                 unique_suffix="charge_power",
             ),
             EnergyManagerDecisionLogSensor(coordinator, entry),
+            EnergyManagerEVStatusSensor(coordinator, entry),
+            EnergyManagerEVCurrentSensor(coordinator, entry),
+            EnergyManagerPowerSensor(
+                coordinator, entry,
+                key="ev_charging_power",
+                name="EV Charging Power",
+                unique_suffix="ev_charging_power",
+            ),
         ]
     )
 
@@ -190,3 +198,56 @@ class EnergyManagerDecisionLogSensor(
             "entry_count": len(entries),
             "entries": entries[-20:],
         }
+
+
+class EnergyManagerEVStatusSensor(
+    CoordinatorEntity[EnergyManagerCoordinator], SensorEntity
+):
+    """Sensor showing the EV charging status."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "ev_charging_status"
+
+    def __init__(
+        self,
+        coordinator: EnergyManagerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_ev_charging_status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current EV charging status."""
+        if self.coordinator.data is None:
+            return None
+        return "charging" if self.coordinator.data.ev_charging_active else "idle"
+
+
+class EnergyManagerEVCurrentSensor(
+    CoordinatorEntity[EnergyManagerCoordinator], SensorEntity
+):
+    """Sensor showing the EV charging current."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "ev_charging_current"
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+
+    def __init__(
+        self,
+        coordinator: EnergyManagerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_ev_charging_current"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current EV charging current."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.ev_charging_current

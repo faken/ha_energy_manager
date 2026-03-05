@@ -28,6 +28,10 @@ from .const import (
     CONF_SOLAR_POWER_SENSOR,
     DEFAULT_CHARGE_POWER_STEP,
     DEFAULT_DEADBAND,
+    DEFAULT_EV_CHARGER_PHASES,
+    DEFAULT_EV_MAX_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_EXCESS_POWER,
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
@@ -44,6 +48,12 @@ from .const import (
     FEED_IN_STATIC,
     OPT_CHARGE_POWER_STEP,
     OPT_DEADBAND,
+    OPT_EV_CHARGER_CURRENT_NUMBER,
+    OPT_EV_CHARGER_PHASES,
+    OPT_EV_CHARGER_SWITCH,
+    OPT_EV_MAX_CHARGING_CURRENT,
+    OPT_EV_MIN_CHARGING_CURRENT,
+    OPT_EV_MIN_EXCESS_POWER,
     OPT_FEED_IN_MODE,
     OPT_FEED_IN_POWER_STEP,
     OPT_FEED_IN_STATIC_POWER,
@@ -300,21 +310,118 @@ class EnergyManagerConfigFlow(ConfigFlow, domain=DOMAIN):
         return EnergyManagerOptionsFlow(config_entry)
 
 
+def _ev_options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
+    """Build the EV options schema with current values as defaults."""
+    if options is None:
+        options = {}
+    return vol.Schema(
+        {
+            vol.Optional(
+                OPT_EV_CHARGER_SWITCH,
+                description={
+                    "suggested_value": options.get(OPT_EV_CHARGER_SWITCH),
+                },
+            ): EntitySelector(
+                EntitySelectorConfig(domain="switch")
+            ),
+            vol.Optional(
+                OPT_EV_CHARGER_CURRENT_NUMBER,
+                description={
+                    "suggested_value": options.get(OPT_EV_CHARGER_CURRENT_NUMBER),
+                },
+            ): EntitySelector(
+                EntitySelectorConfig(domain="number")
+            ),
+            vol.Required(
+                OPT_EV_MIN_EXCESS_POWER,
+                default=options.get(
+                    OPT_EV_MIN_EXCESS_POWER, DEFAULT_EV_MIN_EXCESS_POWER
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=500,
+                    max=5000,
+                    step=100,
+                    unit_of_measurement="W",
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                OPT_EV_MIN_CHARGING_CURRENT,
+                default=options.get(
+                    OPT_EV_MIN_CHARGING_CURRENT, DEFAULT_EV_MIN_CHARGING_CURRENT
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=6,
+                    max=16,
+                    step=1,
+                    unit_of_measurement="A",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                OPT_EV_MAX_CHARGING_CURRENT,
+                default=options.get(
+                    OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=6,
+                    max=32,
+                    step=1,
+                    unit_of_measurement="A",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                OPT_EV_CHARGER_PHASES,
+                default=options.get(
+                    OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES
+                ),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"label": "1 Phase", "value": 1},
+                        {"label": "3 Phases", "value": 3},
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        }
+    )
+
+
 class EnergyManagerOptionsFlow(OptionsFlow):
     """Handle options flow for Energy Manager."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._battery_options: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the options step."""
+        """Handle the battery options step."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            self._battery_options = user_input
+            return await self.async_step_ev()
 
         return self.async_show_form(
             step_id="init",
             data_schema=_options_schema(self._config_entry.options),
+        )
+
+    async def async_step_ev(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the EV charging options step."""
+        if user_input is not None:
+            merged = {**self._battery_options, **user_input}
+            return self.async_create_entry(title="", data=merged)
+
+        return self.async_show_form(
+            step_id="ev",
+            data_schema=_ev_options_schema(self._config_entry.options),
         )
