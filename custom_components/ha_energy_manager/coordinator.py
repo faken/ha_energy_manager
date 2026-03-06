@@ -685,12 +685,14 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 if abs(clamped - self._ev_charging_current) >= 2:
                     old_current = self._ev_charging_current
                     self._ev_charging_current = clamped
-                    await self._async_set_ev_current(clamped)
                     self._log_decision(
                         LOG_POWER_ADJUST,
                         f"EV current adjusted: {old_current:.0f}A → {clamped}A "
                         f"(available {available:.0f}W)",
                     )
+                # Always send the target — dual-check in _async_set_ev_current
+                # skips if entity already matches, retries if it doesn't
+                await self._async_set_ev_current(self._ev_charging_current)
         else:
             # Not charging: check if we should start
             if available >= min_excess:
