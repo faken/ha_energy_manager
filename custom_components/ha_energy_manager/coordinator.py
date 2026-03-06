@@ -682,7 +682,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 # Enough power: adjust current
                 self._ev_deficit_counter = 0
                 clamped = int(max(min(target_amps, max_amps), min_amps))
-                if clamped != self._ev_charging_current:
+                if abs(clamped - self._ev_charging_current) >= 2:
                     old_current = self._ev_charging_current
                     self._ev_charging_current = clamped
                     await self._async_set_ev_current(clamped)
