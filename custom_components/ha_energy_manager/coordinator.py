@@ -587,7 +587,11 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             _LOGGER.warning("Failed to set EV charger switch to %s", on)
 
     async def _async_set_ev_current(self, amps: float) -> None:
-        """Set the EV charging current via number.set_value."""
+        """Set the EV charging current via number.set_value.
+
+        Checks both the internally tracked value and the actual entity state
+        to detect external changes and retry if the device didn't respond.
+        """
         min_amps = self._get_option(
             OPT_EV_MIN_CHARGING_CURRENT, DEFAULT_EV_MIN_CHARGING_CURRENT
         )
@@ -595,9 +599,10 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
         )
         clamped = int(max(min(amps, max_amps), min_amps))
-        if self._last_ev_current == clamped:
-            return
         entity_id = self._get_option(OPT_EV_CHARGER_CURRENT_NUMBER, "")
+        current_state = self._get_entity_state_float(entity_id, default=-1)
+        if self._last_ev_current == clamped and current_state == clamped:
+            return
         try:
             await self.hass.services.async_call(
                 "number",
