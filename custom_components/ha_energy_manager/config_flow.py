@@ -240,9 +240,9 @@ def _options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=50,
+                    min=1,
                     max=200,
-                    step=50,
+                    step=1,
                     unit_of_measurement="W",
                     mode=NumberSelectorMode.BOX,
                 )
