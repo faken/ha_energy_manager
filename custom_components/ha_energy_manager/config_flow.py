@@ -31,6 +31,7 @@ from .const import (
     DEFAULT_EV_CHARGER_PHASES,
     DEFAULT_EV_MAX_CHARGING_CURRENT,
     DEFAULT_EV_MIN_CHARGING_CURRENT,
+    DEFAULT_EV_MIN_BATTERY_SOC,
     DEFAULT_EV_MIN_EXCESS_POWER,
     DEFAULT_FEED_IN_MODE,
     DEFAULT_FEED_IN_POWER_STEP,
@@ -51,6 +52,7 @@ from .const import (
     OPT_EV_CHARGER_CURRENT_NUMBER,
     OPT_EV_CHARGER_PHASES,
     OPT_EV_CHARGER_SWITCH,
+    OPT_EV_MIN_BATTERY_SOC,
     OPT_EV_MAX_CHARGING_CURRENT,
     OPT_EV_MIN_CHARGING_CURRENT,
     OPT_EV_MIN_EXCESS_POWER,
@@ -347,6 +349,20 @@ def _ev_options_schema(options: dict[str, Any] | None = None) -> vol.Schema:
                 },
             ): EntitySelector(
                 EntitySelectorConfig(domain="number")
+            ),
+            vol.Required(
+                OPT_EV_MIN_BATTERY_SOC,
+                default=options.get(
+                    OPT_EV_MIN_BATTERY_SOC, DEFAULT_EV_MIN_BATTERY_SOC
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=100,
+                    step=5,
+                    unit_of_measurement="%",
+                    mode=NumberSelectorMode.SLIDER,
+                )
             ),
             vol.Required(
                 OPT_EV_MIN_EXCESS_POWER,

@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, get_device_info
 from .coordinator import EnergyManagerCoordinator
 
 
@@ -39,6 +39,7 @@ class EnergyManagerEnabledSwitch(
         """Initialize the switch."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_enabled"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def is_on(self) -> bool:

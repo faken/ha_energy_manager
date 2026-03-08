@@ -65,6 +65,7 @@
         "data": {
           "ev_charger_switch": "EV Charger Switch",
           "ev_charger_current_number": "EV Charger Current Control",
+          "ev_min_battery_soc": "Min Battery SOC for EV Charging",
           "ev_min_excess_power": "Min Excess Power to Start",
           "ev_min_charging_current": "Min Charging Current",
           "ev_max_charging_current": "Max Charging Current",
@@ -73,6 +74,7 @@
         "data_description": {
           "ev_charger_switch": "Switch entity that starts/stops the EV charger. Leave empty to disable EV charging.",
           "ev_charger_current_number": "Number entity to control the charging current (amps). Leave empty to disable EV charging.",
+          "ev_min_battery_soc": "Battery must reach this SOC before EV surplus charging starts (100% = fully charged first).",
           "ev_min_excess_power": "Minimum excess solar power (watts) before EV charging starts.",
           "ev_min_charging_current": "Minimum charging current in amps (usually 6A per EV standard).",
           "ev_max_charging_current": "Maximum charging current in amps.",

@@ -24,6 +24,7 @@ from custom_components.ha_energy_manager.const import (
     DEFAULT_EV_MIN_CHARGING_CURRENT,
     DEFAULT_EV_MIN_EXCESS_POWER,
     DEFAULT_FEED_IN_MODE,
+    DEFAULT_FEED_IN_POWER_STEP,
     DEFAULT_FEED_IN_STATIC_POWER,
     DEFAULT_LOG_BUFFER_SIZE,
     DEFAULT_MAX_CHARGE_POWER,
@@ -69,6 +70,7 @@ DEFAULT_OPTIONS = {
     "update_interval": DEFAULT_UPDATE_INTERVAL,
     "deadband": DEFAULT_DEADBAND,
     "charge_power_step": DEFAULT_CHARGE_POWER_STEP,
+    "feed_in_power_step": DEFAULT_FEED_IN_POWER_STEP,
     "min_dwell_time": DEFAULT_MIN_DWELL_TIME,
 }
 

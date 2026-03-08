@@ -20,6 +20,7 @@ from .const import (
     MODE_HOLD,
     MODE_SOLAR,
     MODES,
+    get_device_info,
 )
 from .coordinator import EnergyManagerCoordinator
 
@@ -72,6 +73,7 @@ class EnergyManagerModeSelect(
         """Initialize the select entity."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_mode"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def current_option(self) -> str | None:
@@ -111,6 +113,7 @@ class EnergyManagerEVModeSelect(
         """Initialize the select entity."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_ev_mode"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def current_option(self) -> str | None:

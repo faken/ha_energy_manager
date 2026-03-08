@@ -50,11 +50,13 @@ OPT_EV_MIN_EXCESS_POWER = "ev_min_excess_power"
 OPT_EV_MIN_CHARGING_CURRENT = "ev_min_charging_current"
 OPT_EV_MAX_CHARGING_CURRENT = "ev_max_charging_current"
 OPT_EV_CHARGER_PHASES = "ev_charger_phases"
+OPT_EV_MIN_BATTERY_SOC = "ev_min_battery_soc"
 
 DEFAULT_EV_MIN_EXCESS_POWER = 1400   # W
 DEFAULT_EV_MIN_CHARGING_CURRENT = 6  # A
 DEFAULT_EV_MAX_CHARGING_CURRENT = 16 # A
 DEFAULT_EV_CHARGER_PHASES = 1
+DEFAULT_EV_MIN_BATTERY_SOC = 100     # %
 DEFAULT_EV_VOLTAGE = 230             # V (not configurable)
 DEFAULT_EV_START_DELAY_CYCLES = 3
 DEFAULT_EV_STOP_DELAY_CYCLES = 5
@@ -92,3 +94,16 @@ DEFAULT_LOG_BUFFER_SIZE = 100
 
 # Platforms
 PLATFORMS = ["sensor", "select", "number", "switch"]
+
+
+def get_device_info(entry_id: str) -> dict:
+    """Return shared DeviceInfo dict for all entities."""
+    from homeassistant.helpers.device_registry import DeviceInfo
+
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry_id)},
+        name="Energy Manager",
+        manufacturer="Appenetic",
+        model="EcoFlow Battery Controller",
+        entry_type=None,
+    )

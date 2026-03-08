@@ -66,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Please reconfigure the integration and select the Shelly switch entities."
         )
 
+    if needs_discovery:
         _LOGGER.info(
             "Auto-discovered control entities: charge_power=%s, custom_load=%s, ps_mode=%s",
             entity_ids.get(CONF_MAX_CHARGE_POWER_NUMBER),
@@ -87,6 +88,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    coordinator: EnergyManagerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    await coordinator.async_shutdown()
+
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok

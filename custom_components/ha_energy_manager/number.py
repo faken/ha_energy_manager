@@ -21,12 +21,13 @@ from .const import (
     OPT_GRID_POWER_TOLERANCE_DISCHARGE,
     OPT_MAX_GRID_FEED_IN_POWER,
     OPT_MIN_BATTERY_SOC,
+    get_device_info,
 )
 from .coordinator import EnergyManagerCoordinator
 
 
 @dataclass
-class NumberEntityDescription:
+class EnergyManagerNumberDescription:
     """Description for a number entity."""
 
     key: str
@@ -40,8 +41,8 @@ class NumberEntityDescription:
     mode: NumberMode
 
 
-NUMBER_DESCRIPTIONS: list[NumberEntityDescription] = [
-    NumberEntityDescription(
+NUMBER_DESCRIPTIONS: list[EnergyManagerNumberDescription] = [
+    EnergyManagerNumberDescription(
         key="min_battery_soc",
         name="Min Battery SOC",
         option_key=OPT_MIN_BATTERY_SOC,
@@ -52,7 +53,7 @@ NUMBER_DESCRIPTIONS: list[NumberEntityDescription] = [
         native_unit_of_measurement=PERCENTAGE,
         mode=NumberMode.SLIDER,
     ),
-    NumberEntityDescription(
+    EnergyManagerNumberDescription(
         key="max_feed_in_power",
         name="Max Feed-in Power",
         option_key=OPT_MAX_GRID_FEED_IN_POWER,
@@ -63,7 +64,7 @@ NUMBER_DESCRIPTIONS: list[NumberEntityDescription] = [
         native_unit_of_measurement=UnitOfPower.WATT,
         mode=NumberMode.SLIDER,
     ),
-    NumberEntityDescription(
+    EnergyManagerNumberDescription(
         key="grid_tolerance",
         name="Grid Import Tolerance",
         option_key=OPT_GRID_POWER_TOLERANCE_DISCHARGE,
@@ -74,7 +75,7 @@ NUMBER_DESCRIPTIONS: list[NumberEntityDescription] = [
         native_unit_of_measurement=UnitOfPower.WATT,
         mode=NumberMode.SLIDER,
     ),
-    NumberEntityDescription(
+    EnergyManagerNumberDescription(
         key="static_feed_in_power",
         name="Static Feed-in Power",
         option_key=OPT_FEED_IN_STATIC_POWER,
@@ -113,7 +114,7 @@ class EnergyManagerNumber(RestoreNumber):
         self,
         coordinator: EnergyManagerCoordinator,
         entry: ConfigEntry,
-        description: NumberEntityDescription,
+        description: EnergyManagerNumberDescription,
     ) -> None:
         """Initialize the number entity."""
         self._coordinator = coordinator
@@ -126,6 +127,7 @@ class EnergyManagerNumber(RestoreNumber):
         self._attr_native_step = description.native_step
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_mode = description.mode
+        self._attr_device_info = get_device_info(entry.entry_id)
         self._attr_native_value = entry.options.get(
             description.option_key, description.default
         )

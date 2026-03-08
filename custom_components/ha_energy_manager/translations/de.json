@@ -65,6 +65,7 @@
         "data": {
           "ev_charger_switch": "EV-Ladeschalter",
           "ev_charger_current_number": "EV-Ladestrom-Steuerung",
+          "ev_min_battery_soc": "Min. Batterie-SOC für EV-Laden",
           "ev_min_excess_power": "Min. Überschussleistung zum Starten",
           "ev_min_charging_current": "Min. Ladestrom",
           "ev_max_charging_current": "Max. Ladestrom",
@@ -73,6 +74,7 @@
         "data_description": {
           "ev_charger_switch": "Schalter-Entität zum Starten/Stoppen des EV-Ladegeräts. Leer lassen um EV-Laden zu deaktivieren.",
           "ev_charger_current_number": "Zahlen-Entität zur Steuerung des Ladestroms (Ampere). Leer lassen um EV-Laden zu deaktivieren.",
+          "ev_min_battery_soc": "Batterie muss diesen SOC erreichen, bevor EV-Überschussladen startet (100% = erst vollständig laden).",
           "ev_min_excess_power": "Minimaler Solar-Überschuss (Watt) bevor das EV-Laden startet.",
           "ev_min_charging_current": "Minimaler Ladestrom in Ampere (üblicherweise 6A gemäß EV-Standard).",
           "ev_max_charging_current": "Maximaler Ladestrom in Ampere.",

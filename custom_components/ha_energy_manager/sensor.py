@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, get_device_info
 from .coordinator import EnergyManagerCoordinator, EnergyManagerData
 
 
@@ -82,6 +82,7 @@ class EnergyManagerStatusSensor(
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_status"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> str | None:
@@ -114,6 +115,7 @@ class EnergyManagerPowerSensor(
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> float | None:
@@ -142,6 +144,7 @@ class EnergyManagerSocSensor(
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_battery_soc"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> float | None:
@@ -167,6 +170,7 @@ class EnergyManagerDecisionLogSensor(
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_decision_log"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> str | None:
@@ -216,6 +220,7 @@ class EnergyManagerEVStatusSensor(
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_ev_charging_status"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> str | None:
@@ -244,6 +249,7 @@ class EnergyManagerEVCurrentSensor(
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_ev_charging_current"
+        self._attr_device_info = get_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> float | None:
