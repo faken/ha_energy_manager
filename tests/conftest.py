@@ -98,6 +98,7 @@ def mock_hass():
     hass = MagicMock()
     hass.services = MagicMock()
     hass.services.async_call = AsyncMock()
+    hass.services.has_service = MagicMock(return_value=False)
     hass.async_create_task = MagicMock()
 
     # Default sensor and entity states
