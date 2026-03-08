@@ -1,0 +1,34 @@
+{
+  "entity": {
+    "sensor": {
+      "status": {
+        "default": "mdi:state-machine"
+      },
+      "battery_soc": {
+        "default": "mdi:battery-charging"
+      },
+      "decision_log": {
+        "default": "mdi:text-box-outline"
+      },
+      "ev_charging_status": {
+        "default": "mdi:ev-station"
+      },
+      "ev_charging_current": {
+        "default": "mdi:current-ac"
+      }
+    },
+    "select": {
+      "mode": {
+        "default": "mdi:tune"
+      },
+      "ev_mode": {
+        "default": "mdi:car-electric-outline"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "default": "mdi:power"
+      }
+    }
+  }
+}
