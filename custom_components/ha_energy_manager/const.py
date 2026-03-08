@@ -67,6 +67,13 @@ MODE_AUTOMATIC = "automatic"
 
 MODES = [MODE_FORCED_CHARGE, MODE_HOLD, MODE_SOLAR, MODE_AUTOMATIC]
 
+# EV charging modes
+EV_MODE_OFF = "ev_off"
+EV_MODE_SURPLUS = "ev_surplus"
+EV_MODE_FORCED = "ev_forced"
+
+EV_MODES = [EV_MODE_OFF, EV_MODE_SURPLUS, EV_MODE_FORCED]
+
 # FSM states (internal, for automatic mode)
 STATE_CHARGE = "charge"
 STATE_HOLD = "hold"

@@ -46,6 +46,9 @@ from .const import (
     DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    EV_MODE_FORCED,
+    EV_MODE_OFF,
+    EV_MODE_SURPLUS,
     FEED_IN_DYNAMIC,
     MODE_AUTOMATIC,
     MODE_FORCED_CHARGE,
@@ -98,6 +101,7 @@ class EnergyManagerData:
     feed_in_power: float = 0.0
     charge_power: float = 0.0
     is_enabled: bool = True
+    ev_mode: str = EV_MODE_OFF
     ev_charging_active: bool = False
     ev_charging_current: float = 0.0
     ev_charging_power: float = 0.0
@@ -146,6 +150,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._last_valid_battery_soc: float | None = None
 
         # EV charging state
+        self._ev_mode: str = EV_MODE_OFF
         self._ev_charging_active: bool = False
         self._ev_charging_current: float = 0.0
         self._last_ev_switch: bool | None = None
@@ -266,6 +271,29 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
                 LOG_ENABLED_CHANGE,
                 f"Manager {'enabled' if value else 'disabled'}",
             )
+
+    @property
+    def ev_mode(self) -> str:
+        """Return the current EV charging mode."""
+        return self._ev_mode
+
+    @ev_mode.setter
+    def ev_mode(self, mode: str) -> None:
+        """Set the EV charging mode and reset EV state."""
+        old_mode = self._ev_mode
+        self._ev_mode = mode
+        # Reset EV state
+        self._ev_charging_active = False
+        self._ev_charging_current = 0.0
+        self._ev_excess_counter = 0
+        self._ev_deficit_counter = 0
+        self._last_ev_switch = None
+        self._last_ev_current = None
+
+        self._log_decision(
+            LOG_MODE_CHANGE,
+            f"EV mode changed: {old_mode} → {mode}",
+        )
 
     def update_options(self) -> None:
         """Update coordinator settings from config entry options."""
@@ -623,10 +651,44 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
         self._ev_excess_counter = 0
         self._ev_deficit_counter = 0
 
+    async def _handle_ev_forced_charging(self) -> None:
+        """Handle forced EV charging: charge immediately at max current."""
+        max_amps = self._get_option(
+            OPT_EV_MAX_CHARGING_CURRENT, DEFAULT_EV_MAX_CHARGING_CURRENT
+        )
+        phases = int(self._get_option(OPT_EV_CHARGER_PHASES, DEFAULT_EV_CHARGER_PHASES))
+        voltage = DEFAULT_EV_VOLTAGE
+
+        if not self._ev_charging_active:
+            self._ev_charging_active = True
+            self._ev_charging_current = max_amps
+            await self._async_set_ev_current(max_amps)
+            await self._async_set_ev_switch(True)
+            self._log_decision(
+                LOG_POWER_ADJUST,
+                f"EV forced charging started at {max_amps}A "
+                f"({max_amps * voltage * phases:.0f}W)",
+            )
+        else:
+            # Ensure max current is applied (retry if entity didn't confirm)
+            self._ev_charging_current = max_amps
+            await self._async_set_ev_current(max_amps)
+            await self._async_set_ev_switch(True)
+
     async def _handle_ev_charging(self, grid_power: float, battery_soc: float) -> None:
-        """Handle EV surplus charging overlay logic."""
+        """Handle EV charging based on current EV mode."""
         if not self._ev_configured:
             return
+
+        if self._ev_mode == EV_MODE_OFF:
+            await self._stop_ev_charging("EV mode is off")
+            return
+
+        if self._ev_mode == EV_MODE_FORCED:
+            await self._handle_ev_forced_charging()
+            return
+
+        # EV_MODE_SURPLUS: original surplus charging logic
 
         min_excess = self._get_option(
             OPT_EV_MIN_EXCESS_POWER, DEFAULT_EV_MIN_EXCESS_POWER
@@ -760,6 +822,7 @@ class EnergyManagerCoordinator(DataUpdateCoordinator[EnergyManagerData]):
             feed_in_power=self._current_feed_in_power,
             charge_power=self._current_charge_power,
             is_enabled=self._is_enabled,
+            ev_mode=self._ev_mode,
             ev_charging_active=self._ev_charging_active,
             ev_charging_current=self._ev_charging_current,
             ev_charging_power=ev_power,

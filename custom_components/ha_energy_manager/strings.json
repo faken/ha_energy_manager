@@ -102,6 +102,9 @@
     "select": {
       "mode": {
         "name": "Operating Mode"
+      },
+      "ev_mode": {
+        "name": "EV Charging Mode"
       }
     },
     "switch": {

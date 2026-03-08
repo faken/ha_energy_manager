@@ -1,0 +1,116 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Manager konfigurieren",
+        "description": "Wähle die Sensoren deines EcoFlow-Systems aus.\n\nDie Integration erkennt automatisch die passenden Steuerungs-Entitäten (Ladeleistung, Einspeiseleistung, PowerStream-Modus) der gleichen Geräte.",
+        "data": {
+          "grid_power_sensor": "Netzleistung",
+          "solar_power_sensor": "Solarleistung",
+          "battery_soc_sensor": "Batterie-SOC",
+          "charge_switch": "Lade-Schalter",
+          "discharge_switch": "Entlade-Schalter",
+          "ev_charger_switch": "EV-Ladeschalter (optional)",
+          "ev_charger_current_number": "EV-Ladestrom-Steuerung (optional)"
+        },
+        "data_description": {
+          "grid_power_sensor": "Aktueller Netzbezug (+) / Einspeisung (−) in Watt. Üblicherweise von deinem Smartmeter oder Energiemonitor.",
+          "solar_power_sensor": "Aktuelle Solarproduktion in Watt von deinem PowerStream oder Wechselrichter.",
+          "battery_soc_sensor": "Batterie-Ladezustand in Prozent (z.B. sensor.delta_2_max_battery_level).",
+          "charge_switch": "Shelly-Relais, das die AC-Stromversorgung des Batterieladegeräts steuert. Wird ein-/ausgeschaltet um das Laden zu starten/stoppen.",
+          "discharge_switch": "Shelly-Relais, das den AC-Ausgang des PowerStream steuert. Wird ein-/ausgeschaltet um die Einspeisung zu starten/stoppen.",
+          "ev_charger_switch": "Schalter-Entität zum Starten/Stoppen des EV-Ladegeräts. Leer lassen um EV-Überschussladen zu deaktivieren.",
+          "ev_charger_current_number": "Zahlen-Entität zur Steuerung des EV-Ladestroms (Ampere). Leer lassen um EV-Überschussladen zu deaktivieren."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy Manager Einstellungen",
+        "data": {
+          "feed_in_mode": "Einspeise-Modus",
+          "feed_in_static_power": "Statische Einspeiseleistung",
+          "min_battery_soc": "Min. Batterie-SOC",
+          "max_grid_feed_in_power": "Max. Einspeiseleistung",
+          "grid_power_tolerance_discharge": "Netzbezug-Toleranz (Entladung)",
+          "max_grid_import_solar_charge": "Max. Netzbezug (Solarladen)",
+          "max_charge_power": "Max. Ladeleistung",
+          "min_charge_power": "Min. Ladeleistung",
+          "update_interval": "Aktualisierungsintervall",
+          "deadband": "Totband",
+          "charge_power_step": "Ladeleistungs-Schrittweite",
+          "feed_in_power_step": "Einspeise-Schrittweite",
+          "min_dwell_time": "Min. Verweilzeit"
+        },
+        "data_description": {
+          "feed_in_mode": "Dynamisch passt die Einspeisung an den Verbrauch an. Statisch verwendet einen festen Wert.",
+          "feed_in_static_power": "Feste Einspeiseleistung im statischen Modus.",
+          "min_battery_soc": "Entladung stoppen, wenn die Batterie diesen SOC erreicht.",
+          "max_grid_feed_in_power": "Maximale Leistung zur Einspeisung ins Hausnetz.",
+          "grid_power_tolerance_discharge": "Akzeptabler Netzbezug während der Entladung. Höher = weniger Netzbezug aber weniger Batterienutzung.",
+          "max_grid_import_solar_charge": "Maximaler Netzbezug während des Solarladens (0 = nur reiner Solarbetrieb).",
+          "max_charge_power": "Maximale Batterie-Ladeleistung.",
+          "min_charge_power": "Minimale Batterie-Ladeleistung (unterhalb wird das Laden gestoppt).",
+          "update_interval": "Wie oft der Manager auswertet und anpasst (Sekunden).",
+          "deadband": "Leistungsabweichungs-Schwelle vor Anpassung (verhindert Oszillation).",
+          "charge_power_step": "Schrittweite für Ladeleistungs-Anpassungen pro Zyklus (Hardware-Beschränkung).",
+          "feed_in_power_step": "Schrittweite für Einspeiseleistungs-Anpassungen pro Zyklus.",
+          "min_dwell_time": "Mindestzeit in einem Zustand vor dem Wechsel (Sekunden)."
+        }
+      },
+      "ev": {
+        "title": "EV-Ladeeinstellungen",
+        "data": {
+          "ev_charger_switch": "EV-Ladeschalter",
+          "ev_charger_current_number": "EV-Ladestrom-Steuerung",
+          "ev_min_excess_power": "Min. Überschussleistung zum Starten",
+          "ev_min_charging_current": "Min. Ladestrom",
+          "ev_max_charging_current": "Max. Ladestrom",
+          "ev_charger_phases": "Ladephasen"
+        },
+        "data_description": {
+          "ev_charger_switch": "Schalter-Entität zum Starten/Stoppen des EV-Ladegeräts. Leer lassen um EV-Laden zu deaktivieren.",
+          "ev_charger_current_number": "Zahlen-Entität zur Steuerung des Ladestroms (Ampere). Leer lassen um EV-Laden zu deaktivieren.",
+          "ev_min_excess_power": "Minimaler Solar-Überschuss (Watt) bevor das EV-Laden startet.",
+          "ev_min_charging_current": "Minimaler Ladestrom in Ampere (üblicherweise 6A gemäß EV-Standard).",
+          "ev_max_charging_current": "Maximaler Ladestrom in Ampere.",
+          "ev_charger_phases": "Anzahl der Phasen des EV-Ladegeräts."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status"
+      },
+      "battery_soc": {
+        "name": "Batterie-SOC"
+      },
+      "decision_log": {
+        "name": "Entscheidungsprotokoll"
+      },
+      "ev_charging_status": {
+        "name": "EV-Ladestatus"
+      },
+      "ev_charging_current": {
+        "name": "EV-Ladestrom"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Betriebsmodus"
+      },
+      "ev_mode": {
+        "name": "EV-Lademodus"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Aktiviert"
+      }
+    }
+  }
+}
