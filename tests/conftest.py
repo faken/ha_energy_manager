@@ -35,6 +35,7 @@ from custom_components.ha_energy_manager.const import (
     DEFAULT_GRID_POWER_TOLERANCE_DISCHARGE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    EV_MODE_SURPLUS,
     MODE_HOLD,
     OPT_EV_CHARGER_CURRENT_NUMBER,
     OPT_EV_CHARGER_PHASES,
@@ -174,4 +175,5 @@ def ev_coordinator(mock_hass, mock_config_entry):
     coord.name = DOMAIN
     coord.update_interval = None
     coord._fsm_state_entered_at = time.monotonic() - 120
+    coord._ev_mode = EV_MODE_SURPLUS
     return coord
